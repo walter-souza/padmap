@@ -1,0 +1,27 @@
+[package]
+name = "padmap-input"
+description = "Leitura de controles via SDL3 (Xbox, PlayStation, Switch e genéricos)"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = ["sdl-build-from-source"]
+# Compila o SDL3 junto (precisa de CMake e um compilador C). Desligue para
+# usar um SDL3 já instalado no sistema.
+sdl-build-from-source = ["sdl3/build-from-source-static", "sdl3-sys/sdl-unix-console-build"]
+
+[dependencies]
+padmap-core.workspace = true
+log.workspace = true
+sdl3 = "0.20"
+# Só precisamos de joystick/gamepad e eventos. Desligar o resto deixa a
+# compilação do SDL mais rápida e sem dependências de X11/Wayland/áudio.
+sdl3-sys = { version = "0.7", features = [
+    "no-sdl-video",
+    "no-sdl-render",
+    "no-sdl-gpu",
+    "no-sdl-camera",
+    "no-sdl-audio",
+    "no-sdl-dialog",
+    "no-sdl-tray",
+] }

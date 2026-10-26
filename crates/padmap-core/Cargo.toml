@@ -1,0 +1,10 @@
+[package]
+name = "padmap-core"
+description = "Modelo de perfis e motor de mapeamento controle -> teclado (sem dependências de SO)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+toml.workspace = true
+thiserror.workspace = true

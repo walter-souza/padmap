@@ -1,0 +1,58 @@
+//! Saída de teclado. Cada sistema operacional tem seu backend, escolhido em
+//! tempo de compilação por `platform_sink()`; o resto do app só conhece o
+//! trait `KeyboardSink`.
+
+mod codes;
+
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(windows)]
+mod windows;
+
+pub use padmap_core::KeyAction;
+
+#[derive(Debug, thiserror::Error)]
+pub enum OutputError {
+    #[error("falha ao inicializar a saída de teclado: {0}")]
+    Init(String),
+    #[error("falha ao enviar tecla: {0}")]
+    Send(String),
+    #[error("injeção de teclado ainda não suportada neste sistema")]
+    Unsupported,
+}
+
+pub trait KeyboardSink {
+    fn send(&mut self, action: KeyAction) -> Result<(), OutputError>;
+
+    fn send_all(&mut self, actions: &[KeyAction]) -> Result<(), OutputError> {
+        actions.iter().try_for_each(|&a| self.send(a))
+    }
+}
+
+/// Backend nativo do sistema atual.
+pub fn platform_sink() -> Result<Box<dyn KeyboardSink>, OutputError> {
+    #[cfg(windows)]
+    return Ok(Box::new(windows::SendInputSink::new()));
+    #[cfg(target_os = "linux")]
+    return Ok(Box::new(linux::UinputSink::new()?));
+    #[cfg(target_os = "macos")]
+    return Ok(Box::new(macos::CgEventSink::new()?));
+    #[allow(unreachable_code)]
+    Err(OutputError::Unsupported)
+}
+
+/// Só registra as teclas no log, sem injetar nada. Útil para testar perfis.
+#[derive(Default)]
+pub struct DryRunSink;
+
+impl KeyboardSink for DryRunSink {
+    fn send(&mut self, action: KeyAction) -> Result<(), OutputError> {
+        match action {
+            KeyAction::Press(k) => log::info!("[simulação] pressiona {k}"),
+            KeyAction::Release(k) => log::info!("[simulação] solta {k}"),
+        }
+        Ok(())
+    }
+}

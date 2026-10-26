@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = ["crates/padmap-core", "crates/padmap-input", "crates/padmap-output", "crates/padmap"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+
+[workspace.dependencies]
+padmap-core = { path = "crates/padmap-core" }
+padmap-input = { path = "crates/padmap-input" }
+padmap-output = { path = "crates/padmap-output" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+thiserror = "2"
+anyhow = "1"
+log = "0.4"

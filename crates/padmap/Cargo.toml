@@ -1,0 +1,19 @@
+[package]
+name = "padmap"
+description = "Mapeia qualquer controle (Xbox, PlayStation, genérico) para o teclado"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "padmap"
+path = "src/main.rs"
+
+[dependencies]
+padmap-core.workspace = true
+padmap-input.workspace = true
+padmap-output.workspace = true
+anyhow.workspace = true
+log.workspace = true
+env_logger = "0.11"
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3"

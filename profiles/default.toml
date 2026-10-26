@@ -1,0 +1,47 @@
+# Perfil de exemplo: movimentação estilo WASD.
+# Botões usam nomes posicionais: south = A (Xbox) / Cruz (PS) / B (Nintendo).
+name = "Padrão (WASD)"
+
+[settings]
+axis_threshold = 0.5
+release_ratio = 0.8
+
+[buttons]
+south = "Space"
+east = "LCtrl"
+west = "R"
+north = "E"
+left_shoulder = "Q"
+right_shoulder = "F"
+back = "Tab"
+start = "Escape"
+left_stick = "LShift"
+right_stick = "V"
+dpad_up = "1"
+dpad_right = "2"
+dpad_down = "3"
+dpad_left = "4"
+
+[axes.left_x]
+negative = "A"
+positive = "D"
+
+[axes.left_y]
+negative = "W"
+positive = "S"
+
+[axes.right_x]
+negative = "Left"
+positive = "Right"
+
+[axes.right_y]
+negative = "Up"
+positive = "Down"
+
+[axes.left_trigger]
+positive = "LAlt"
+threshold = 0.3
+
+[axes.right_trigger]
+positive = "Enter"
+threshold = 0.3
