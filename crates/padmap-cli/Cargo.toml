@@ -1,0 +1,16 @@
+[package]
+name = "padmap-cli"
+description = "Linha de comando do padmap (listar, monitorar, validar e rodar perfis)"
+version.workspace = true
+edition.workspace = true
+
+
+[dependencies]
+padmap-core.workspace = true
+padmap-input.workspace = true
+padmap-output.workspace = true
+anyhow.workspace = true
+log.workspace = true
+env_logger = "0.11"
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3"

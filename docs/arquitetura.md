@@ -8,6 +8,7 @@
 | Entrada | SDL3 (crate `sdl3`, compilado estático) | base de mapeamentos `gamecontrollerdb`, drivers HIDAPI para DualShock 4/DualSense/Switch Pro, XInput e Windows.Gaming.Input no Windows. Um só código para qualquer controle |
 | Saída | uma implementação por SO | não existe API portátil para injetar teclas |
 | Perfis | TOML (`serde`) | legível e editável à mão |
+| Interface | egui/eframe | Rust puro, um binário só, roda igual nos três sistemas |
 
 ## Crates
 
@@ -20,7 +21,9 @@ crates/
                    linux.rs    teclado virtual via /dev/uinput (X11 e Wayland)
                    macos.rs    CGEventPost (exige permissão de Acessibilidade)
                  codes.rs tem as três tabelas Key -> código nativo.
-  padmap         binário de linha de comando (list, monitor, check, run).
+  padmap-gui     interface gráfica (egui), binário `padmap`. Uma thread lê o
+                 controle e roda o Mapper; a janela só desenha e edita o perfil.
+  padmap-cli     binário de linha de comando `padmap-cli` (list, monitor, check, run).
 ```
 
 Fluxo: `GamepadSource::next_event` -> `Mapper::handle` -> `Vec<KeyAction>` -> `KeyboardSink::send`.
@@ -37,6 +40,9 @@ Fluxo: `GamepadSource::next_event` -> `Mapper::handle` -> `Vec<KeyAction>` -> `K
   `threshold * release_ratio`.
 - **Eventos em segundo plano.** O hint `SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS`
   é ligado porque o foco está sempre no jogo, não no padmap.
+- **Mapeamento fora da interface.** A janela do egui só é redesenhada quando
+  algo muda e para quando está sem foco, então a leitura do controle e o envio
+  das teclas ficam numa thread própria (`padmap-gui/src/worker.rs`).
 - **SDL enxuto.** O SDL é compilado sem vídeo, áudio, render e GPU; só
   joystick, gamepad, HIDAPI e eventos.
 
@@ -44,7 +50,6 @@ Fluxo: `GamepadSource::next_event` -> `Mapper::handle` -> `Vec<KeyAction>` -> `K
 
 1. Testar em Windows com controles reais (Xbox, DualSense, genérico).
 2. Ícone na bandeja e troca de perfil por atalho no controle.
-3. Interface gráfica para editar perfis (candidatos: `egui` ou Tauri).
-4. Perfis por controle e por jogo (detectar o processo em primeiro plano).
-5. Mapear para mouse (stick como cursor), turbo, macros e camadas (segurar um botão muda o mapa).
-6. Instalador Windows (MSI/winget) e pacotes Linux/macOS.
+3. Perfis por controle e por jogo (detectar o processo em primeiro plano).
+4. Mapear para mouse (stick como cursor), turbo, macros e camadas (segurar um botão muda o mapa).
+5. Instalador Windows (MSI/winget) e pacotes Linux/macOS.

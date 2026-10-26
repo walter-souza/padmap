@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/padmap-core", "crates/padmap-input", "crates/padmap-output", "crates/padmap"]
+members = ["crates/padmap-core", "crates/padmap-input", "crates/padmap-output", "crates/padmap-cli", "crates/padmap-gui"]
 
 [workspace.package]
 version = "0.1.0"

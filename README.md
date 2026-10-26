@@ -3,7 +3,7 @@
 Mapeia qualquer controle (Xbox, PlayStation, Switch ou genérico) para o
 teclado. Windows primeiro, com Linux e macOS já previstos na arquitetura.
 
-> Nome provisório. Estado: esqueleto inicial, só linha de comando.
+> Nome provisório. Estado: primeira versão com interface gráfica, ainda em testes.
 
 ## Como funciona
 
@@ -16,16 +16,35 @@ teclado. Windows primeiro, com Linux e macOS já previstos na arquitetura.
 
 Detalhes em [docs/arquitetura.md](docs/arquitetura.md).
 
-## Uso
+## Interface gráfica
+
+```sh
+cargo run --release -p padmap-gui
+```
+
+![Tela principal](docs/tela-principal.png)
+
+- **Controle ao vivo:** o desenho acende os botões, mostra a posição dos sticks
+  e o quanto os gatilhos estão apertados. Os controles conectados aparecem acima.
+- **Mapear:** clique numa parte do desenho ou em "Capturar" e aperte a tecla
+  (ou combinação, como `Ctrl+S`) no teclado. Também dá para digitar o nome da tecla.
+- **Testar sem risco:** com "Simulação" marcado, "Ativar mapeamento" só mostra
+  no log as teclas que seriam enviadas. Desmarque para enviar de verdade.
+- **Perfis:** Novo, Abrir, Salvar e Salvar como, em arquivos `.toml`.
+- **Sensibilidade:** ajuste em que ponto sticks e gatilhos acionam e soltam a tecla.
+
+O mapeamento continua funcionando com a janela minimizada ou com o jogo em primeiro plano.
+
+## Linha de comando
 
 ```sh
 cargo build --release
 
-padmap list                              # controles conectados
-padmap monitor                           # mostra os eventos ao mexer no controle
-padmap check profiles/default.toml       # valida um perfil
-padmap run profiles/default.toml         # mapeia de verdade
-padmap run --dry-run profiles/default.toml  # só mostra as teclas no log
+padmap-cli list                              # controles conectados
+padmap-cli monitor                           # mostra os eventos ao mexer no controle
+padmap-cli check profiles/default.toml       # valida um perfil
+padmap-cli run profiles/default.toml         # mapeia de verdade
+padmap-cli run --dry-run profiles/default.toml  # só mostra as teclas no log
 ```
 
 ## Perfil
