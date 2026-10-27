@@ -4,6 +4,7 @@
 mod app;
 mod capture;
 mod diagram;
+mod profiles;
 mod slots;
 mod stick_editor;
 mod theme;

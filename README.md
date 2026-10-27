@@ -53,8 +53,16 @@ cargo run --release -p padmap-gui
 - **Testar sem risco:** com "Simulação" ligada, "Ativar mapeamento" só mostra
   no log as teclas que seriam enviadas. Desligue para enviar de verdade. O log
   abre pelo botão "Log" no rodapé.
-- **Perfis:** Novo, Abrir e Salvar no topo; renomear e "Salvar como…" no menu
-  do nome do perfil.
+- **Perfis:** ficam numa pasta do padmap (no Windows,
+  `%APPDATA%\padmap\data\perfis`; no Linux, `~/.local/share/padmap/perfis`; no
+  macOS, `~/Library/Application Support/padmap/perfis`), e o padmap reabre o
+  último usado. Clique no nome do perfil para ver a lista, com busca: um clique
+  troca de perfil. O "•••" de cada perfil tem Renomear (o arquivo acompanha o
+  nome), Duplicar, Exportar (uma cópia para compartilhar) e Excluir (vai para a
+  lixeira). Embaixo da lista ficam "Novo perfil" e "Importar…", que traz para a
+  pasta um perfil de fora. O ícone ao lado do nome salva, e ganha um ponto
+  quando há alterações não salvas; trocar de perfil com alterações pergunta se
+  é para salvar ou descartar.
 - **Modo claro e escuro:** o botão de sol e lua no topo troca o tema, e a
   escolha fica salva para a próxima vez.
 

@@ -62,6 +62,9 @@ pub struct Palette {
     pub mapped_text: Color32,
     pub key_bg: Color32,
     pub key_text: Color32,
+    /// Tinta vermelha para estados de perigo (ex.: enviando teclas de verdade).
+    pub bad_bg: Color32,
+    pub bad_text: Color32,
     pub mapped_line: Color32,
     /// Fundo das etiquetas amarelas (stick acionado).
     pub active_bg: Color32,
@@ -108,6 +111,8 @@ pub const LIGHT: Palette = Palette {
     mapped_text: rgb(0x1F2937),
     key_bg: rgb(0xDBEAFE),
     key_text: rgb(0x1D4ED8),
+    bad_bg: rgb(0xFEE2E2),
+    bad_text: rgb(0xB91C1C),
     mapped_line: rgb(0x93B4E8),
     active_bg: rgb(0xFFFBEB),
     switch_off: rgb(0xD5DBE5),
@@ -151,6 +156,8 @@ pub const DARK: Palette = Palette {
     mapped_text: rgb(0xE5E9F0),
     key_bg: rgb(0x1E3A6B),
     key_text: rgb(0xBFDBFE),
+    bad_bg: rgb(0x3B1418),
+    bad_text: rgb(0xFCA5A5),
     mapped_line: rgb(0x33507F),
     active_bg: rgb(0x2A2306),
     switch_off: rgb(0x26345A),
