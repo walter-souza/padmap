@@ -1,4 +1,4 @@
-use crate::capture::Capture;
+use crate::capture::{self, Capture};
 use crate::diagram::{self, Click, Live};
 use crate::slots::Slot;
 use crate::stick_editor::{Outcome, StickEditor};
@@ -402,40 +402,20 @@ impl PadmapApp {
         let slot = *slot;
         let events = ui.input(|i| i.events.clone());
         let result = capture.feed(&events);
-        let preview = capture.preview();
-
-        let mut cancel = false;
-        egui::Modal::new(egui::Id::unique("padmap-capture")).show(ui.ctx(), |ui| {
-            ui.set_width(340.0);
-            ui.heading(slot.label());
-            ui.add_space(8.0);
-            ui.label("Aperte a tecla ou combinação no teclado.");
-            ui.label(
-                RichText::new("Para usar só um modificador (Shift, Ctrl, Alt), aperte e solte.")
-                    .small()
-                    .weak(),
-            );
-            ui.add_space(8.0);
-            ui.label(
-                RichText::new(if preview.is_empty() {
-                    "…".into()
-                } else {
-                    format!("{preview}+…")
-                })
-                .monospace()
-                .size(18.0),
-            );
-            ui.add_space(8.0);
-            if ui.button("Cancelar").clicked() {
-                cancel = true;
-            }
-        });
+        let held = capture.keys().to_vec();
+        let current = slot.get(&self.profile).cloned();
+        let pal = theme::palette(self.theme);
+        let action = capture::modal(ui.ctx(), pal, slot.label(), current.as_ref(), &held);
 
         if let Some(combo) = result {
             self.capture = None;
             self.set_slot(slot, Some(combo));
-        } else if cancel {
+        } else if let Some(action) = action {
             self.capture = None;
+            if let capture::ModalAction::Clear = action {
+                self.push_log(format!("{}: livre", slot.label()));
+                self.set_slot(slot, None);
+            }
         }
     }
 }

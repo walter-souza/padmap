@@ -610,14 +610,18 @@ impl Stage<'_> {
 
     fn lines(&self) {
         for co in CALLOUTS {
-            let color = if co.slot.get(self.profile).is_some() {
-                self.pal.mapped_line
+            let mapped = co.slot.get(self.profile).is_some();
+            // Acende junto com a etiqueta quando o botão mapeado é acionado.
+            let (width, color) = if mapped && self.live.is_active(co.slot, self.profile) {
+                (2.4, ACCENT)
+            } else if mapped {
+                (1.2, self.pal.mapped_line)
             } else {
-                self.pal.free_line
+                (1.2, self.pal.free_line)
             };
             let points = co.line.iter().map(|&(x, y)| self.at(x, y)).collect();
             self.painter
-                .add(Shape::line(points, self.stroke(1.2, color)));
+                .add(Shape::line(points, self.stroke(width, color)));
         }
     }
 

@@ -28,8 +28,9 @@ cargo run --release -p padmap-gui
   gatilhos conforme você mexe no controle. A etiqueta da tecla que está sendo
   enviada fica destacada. O controle conectado aparece no topo.
 - **Mapear:** cada botão tem uma etiqueta ligada a ele por uma linha. Clique na
-  etiqueta (ou no próprio botão do desenho) e aperte a tecla ou combinação, como
-  `Ctrl+S`. Botão direito na etiqueta deixa o botão livre.
+  etiqueta (ou no próprio botão do desenho), segure a tecla ou as teclas juntas
+  (`Ctrl+S`, `A+B`) e solte: a combinação vale ao soltar tudo. Botão direito na
+  etiqueta, ou "Deixar livre" no modal, deixa o botão livre.
 - **Sticks:** os dois círculos embaixo mostram em amarelo o setor que está
   acionando uma tecla. Clique num deles (ou em LS / RS) para abrir o
   **Mapeamento por Ângulo**: o círculo do stick dividido em setores, cada um com

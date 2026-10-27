@@ -5,16 +5,16 @@
 //! Tudo é editado numa cópia; o perfil só muda em "Salvar Mapeamento".
 
 use crate::app::switch;
-use crate::capture::Capture;
+use crate::capture::{keys_ui, Capture};
 use crate::diagram::{polar, wedge, Live};
 use crate::slots::stick_title;
-use crate::theme::{Palette, ACCENT, ACCENT_STRONG, ACTIVE, SECTOR_COLORS};
+use crate::theme::{Palette, ACCENT, ACCENT_STRONG, SECTOR_COLORS};
 use eframe::egui::{
     self, vec2, Align, Align2, Color32, CornerRadius, CursorIcon, FontId, Layout, Margin, Pos2,
     Rect, Response, RichText, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder,
 };
 use padmap_core::stick::angle_of;
-use padmap_core::{Axis, Profile, Sector, Stick, StickBinding};
+use padmap_core::{Axis, Key, Profile, Sector, Stick, StickBinding};
 
 const LEFT_W: f32 = 400.0;
 const RIGHT_W: f32 = 300.0;
@@ -336,8 +336,8 @@ impl StickEditor {
                 ui.allocate_exact_size(vec2(ui.available_width(), DIAL_H), Sense::click_and_drag());
             self.dial(ui, pal, live, rect, &resp);
             if let Some((i, capture)) = &self.capture {
-                let preview = capture.preview();
-                if capture_overlay(ui, pal, rect, *i, &preview) {
+                let held = capture.keys().to_vec();
+                if capture_overlay(ui, pal, rect, *i, &held) {
                     self.capture = None;
                 }
             }
@@ -801,40 +801,25 @@ fn list_row(ui: &mut Ui, pal: &Palette, text: &str, selected: bool, clickable: b
 
 /// Cobre o círculo enquanto a tecla de um setor é capturada.
 /// Retorna `true` se a captura foi cancelada.
-fn capture_overlay(ui: &mut Ui, pal: &Palette, rect: Rect, sector: usize, preview: &str) -> bool {
+fn capture_overlay(ui: &mut Ui, pal: &Palette, rect: Rect, sector: usize, held: &[Key]) -> bool {
     ui.painter()
-        .rect_filled(rect.expand(8.0), 10.0, pal.bar.gamma_multiply(0.94));
+        .rect_filled(rect.expand(8.0), 10.0, pal.bar.gamma_multiply(0.96));
     let mut cancel = false;
     ui.scope_builder(
         UiBuilder::new()
-            .max_rect(rect)
+            .max_rect(rect.shrink(16.0))
             .layout(Layout::top_down(Align::Center)),
         |ui| {
-            ui.add_space(rect.height() * 0.2);
-            let (r, _) = ui.allocate_exact_size(vec2(64.0, 64.0), Sense::hover());
-            ui.painter()
-                .circle(r.center(), 30.0, pal.bar, Stroke::new(2.0, ACTIVE));
-            ui.painter().circle_filled(r.center(), 9.0, ACCENT);
-            ui.add_space(4.0);
+            ui.add_space(rect.height() * 0.16);
             ui.label(
                 RichText::new(format!("Mapeando Região {}", sector + 1))
                     .size(16.0)
                     .strong()
                     .color(pal.text),
             );
-            ui.spacing_mut().item_spacing.y = 2.0;
-            ui.label(
-                RichText::new("Pressione as teclas no seu teclado físico").color(pal.text_muted),
-            );
-            ui.label(RichText::new("para mapear este setor…").color(pal.text_muted));
-            ui.add_space(6.0);
-            let shown = if preview.is_empty() {
-                "…".to_owned()
-            } else {
-                format!("{preview}+…")
-            };
-            ui.label(RichText::new(shown).monospace().size(16.0).color(pal.text));
-            ui.add_space(10.0);
+            ui.add_space(14.0);
+            keys_ui(ui, pal, held);
+            ui.add_space(18.0);
             if ui.button("Cancelar Mapeamento").clicked() {
                 cancel = true;
             }

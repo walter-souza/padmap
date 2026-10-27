@@ -1,7 +1,11 @@
 //! Captura de tecla: o usuário aperta a tecla (ou combinação) no teclado e ela
 //! vira o mapeamento.
 
-use eframe::egui::{self, Event};
+use crate::theme::{Palette, ACCENT, ACCENT_STRONG, BAD};
+use eframe::egui::{
+    self, vec2, Align, Align2, CornerRadius, Event, FontId, Layout, Margin, Pos2, Rect, RichText,
+    Sense, Shape, Stroke, Ui,
+};
 use padmap_core::{Key, KeyCombo};
 
 const MODIFIERS: [Key; 8] = [
@@ -17,16 +21,16 @@ const MODIFIERS: [Key; 8] = [
 
 #[derive(Default)]
 pub struct Capture {
-    /// Modificadores seguros agora, na ordem em que foram apertados.
+    /// Teclas seguras agora.
     held: Vec<Key>,
-    /// Todos os modificadores apertados desde o início da captura.
+    /// Todas as teclas apertadas desde o início da captura, modificadores
+    /// primeiro e o resto na ordem em que foram apertadas.
     seen: Vec<Key>,
 }
 
 impl Capture {
-    /// Processa os eventos do quadro. Retorna a combinação quando ela termina:
-    /// ao apertar uma tecla comum (com os modificadores seguros), ou ao soltar
-    /// todos os modificadores sem apertar outra tecla (ex.: só `Shift`).
+    /// Processa os eventos do quadro. Junta todas as teclas apertadas e retorna
+    /// a combinação quando todas são soltas: `A`, `Ctrl+S`, `A+B` ou só `Shift`.
     pub fn feed(&mut self, events: &[Event]) -> Option<KeyCombo> {
         for event in events {
             let Event::Key {
@@ -42,36 +46,314 @@ impl Capture {
             let Some(k) = from_egui(physical_key.unwrap_or(*key)) else {
                 continue;
             };
-            if MODIFIERS.contains(&k) {
-                if *pressed {
-                    if !self.held.contains(&k) {
-                        self.held.push(k);
-                    }
-                    if !self.seen.contains(&k) {
-                        self.seen.push(k);
-                    }
-                } else {
-                    self.held.retain(|h| *h != k);
-                    if self.held.is_empty() && !self.seen.is_empty() {
-                        return Some(KeyCombo(std::mem::take(&mut self.seen)));
-                    }
+            if *pressed {
+                if !self.held.contains(&k) {
+                    self.held.push(k);
                 }
-            } else if *pressed {
-                let mut keys = self.held.clone();
-                keys.push(k);
-                return Some(KeyCombo(keys));
+                if !self.seen.contains(&k) {
+                    self.seen.push(k);
+                    // Modificadores vão na frente, para `S` antes de `Ctrl`
+                    // ainda virar `Ctrl+S` quando o padmap apertar.
+                    self.seen.sort_by_key(|k| !MODIFIERS.contains(k));
+                }
+            } else if self.held.contains(&k) {
+                self.held.retain(|h| *h != k);
+                if self.held.is_empty() {
+                    return Some(KeyCombo(std::mem::take(&mut self.seen)));
+                }
             }
         }
         None
     }
 
-    pub fn preview(&self) -> String {
-        self.held
-            .iter()
-            .map(|k| k.name())
-            .collect::<Vec<_>>()
-            .join("+")
+    /// As teclas que a combinação vai ter se o usuário soltar tudo agora.
+    pub fn keys(&self) -> &[Key] {
+        &self.seen
     }
+}
+
+/// O que o usuário escolheu no modal de captura, além de apertar uma tecla.
+pub enum ModalAction {
+    Cancel,
+    Clear,
+}
+
+/// Modal de captura de um botão: cabeçalho com o nome, tecla atual, área das
+/// teclas e rodapé com "Deixar livre" e "Cancelar". Esc não fecha, porque
+/// também é uma tecla que dá para mapear.
+pub fn modal(
+    ctx: &egui::Context,
+    pal: &Palette,
+    title: &str,
+    current: Option<&KeyCombo>,
+    held: &[Key],
+) -> Option<ModalAction> {
+    let mut action = None;
+    let resp = egui::Modal::new(egui::Id::unique("padmap-capture"))
+        .frame(
+            egui::Frame::new()
+                .fill(pal.bar)
+                .stroke(Stroke::new(1.0, pal.chrome_border))
+                .corner_radius(14),
+        )
+        .show(ctx, |ui| {
+            ui.set_width(400.0);
+            ui.spacing_mut().item_spacing = vec2(8.0, 0.0);
+            let head = egui::Frame::new()
+                .fill(pal.chrome)
+                .corner_radius(CornerRadius {
+                    nw: 14,
+                    ne: 14,
+                    sw: 0,
+                    se: 0,
+                })
+                .inner_margin(Margin::symmetric(18, 12))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Mapear").size(15.0).strong().color(pal.text));
+                        ui.label(
+                            RichText::new(format!("· {title}"))
+                                .size(15.0)
+                                .color(pal.chrome_muted),
+                        );
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let x = egui::Button::new(
+                                RichText::new("×").size(18.0).color(pal.chrome_muted),
+                            )
+                            .frame(false);
+                            if ui.add(x).on_hover_text("Cancelar").clicked() {
+                                action = Some(ModalAction::Cancel);
+                            }
+                        });
+                    });
+                });
+            let r = head.response.rect;
+            ui.painter()
+                .hline(r.x_range(), r.bottom(), Stroke::new(1.0, pal.chrome_border));
+
+            egui::Frame::new()
+                .inner_margin(Margin {
+                    left: 18,
+                    right: 18,
+                    top: 14,
+                    bottom: 16,
+                })
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Atual").size(12.0).color(pal.text_muted));
+                        match current {
+                            Some(c) => {
+                                egui::Frame::new()
+                                    .fill(pal.key_bg)
+                                    .corner_radius(4)
+                                    .inner_margin(Margin::symmetric(7, 2))
+                                    .show(ui, |ui| {
+                                        ui.label(
+                                            RichText::new(combo_label(c).to_uppercase())
+                                                .size(11.0)
+                                                .strong()
+                                                .color(pal.key_text),
+                                        );
+                                    });
+                            }
+                            None => {
+                                ui.label(RichText::new("livre").size(12.0).color(pal.text_muted));
+                            }
+                        }
+                    });
+                    ui.add_space(12.0);
+                    keys_ui(ui, pal, held);
+                });
+
+            let top = ui.cursor().top();
+            ui.painter().hline(
+                ui.max_rect().x_range(),
+                top,
+                Stroke::new(1.0, pal.bar_border),
+            );
+            egui::Frame::new()
+                .inner_margin(Margin::symmetric(18, 10))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        if current.is_some() {
+                            let clear = egui::Button::new(RichText::new("Deixar livre").color(BAD))
+                                .frame(false)
+                                .min_size(vec2(0.0, 30.0));
+                            if ui
+                                .add(clear)
+                                .on_hover_text("Tira a tecla deste botão")
+                                .clicked()
+                            {
+                                action = Some(ModalAction::Clear);
+                            }
+                        }
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let cancel =
+                                egui::Button::new(RichText::new("Cancelar").color(pal.text))
+                                    .min_size(vec2(0.0, 30.0));
+                            if ui.add(cancel).clicked() {
+                                action = Some(ModalAction::Cancel);
+                            }
+                        });
+                    });
+                });
+        });
+    if resp.backdrop_response.clicked() {
+        action = Some(ModalAction::Cancel);
+    }
+    action
+}
+
+/// Nome curto e amigável da tecla, como aparece no teclado.
+pub fn key_label(k: Key) -> String {
+    match k {
+        Key::LeftShift => "Shift".into(),
+        Key::RightShift => "Shift dir.".into(),
+        Key::LeftCtrl => "Ctrl".into(),
+        Key::RightCtrl => "Ctrl dir.".into(),
+        Key::LeftAlt => "Alt".into(),
+        Key::RightAlt => "AltGr".into(),
+        Key::LeftMeta => "Win".into(),
+        Key::RightMeta => "Win dir.".into(),
+        _ => k.name().to_uppercase(),
+    }
+}
+
+/// A combinação com os nomes amigáveis de [`key_label`] (ex.: "Ctrl+Shift+S").
+pub fn combo_label(c: &KeyCombo) -> String {
+    c.0.iter()
+        .map(|&k| key_label(k))
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+/// Altura fixa da área de captura, para o modal não pular entre os estados.
+const AREA_H: f32 = 112.0;
+
+/// Área central da captura: um teclado esperando a primeira tecla ou as
+/// teclas já apertadas, desenhadas, e um espaço para mais uma.
+pub fn keys_ui(ui: &mut Ui, pal: &Palette, held: &[Key]) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), AREA_H), Sense::hover());
+    let painter = ui.painter();
+    let (title, hint) = if held.is_empty() {
+        let c = rect.center_top() + vec2(0.0, 30.0);
+        painter.circle(c, 27.0, pal.key_bg, Stroke::NONE);
+        dashed_circle(painter, c, 27.0, ACCENT);
+        keyboard_icon(painter, c);
+        (
+            "Pressione a tecla no teclado",
+            "Segure várias teclas juntas para combinar",
+        )
+    } else {
+        let font = FontId::proportional(14.0);
+        let caps: Vec<_> = held
+            .iter()
+            .map(|&k| painter.layout_no_wrap(key_label(k), font.clone(), egui::Color32::WHITE))
+            .collect();
+        let plus = painter.layout_no_wrap("+".into(), font.clone(), pal.text_muted);
+        let (h, pad, gap, slot_w) = (32.0, 12.0, 8.0, 40.0);
+        let widths: Vec<f32> = caps
+            .iter()
+            .map(|g| (g.size().x + 2.0 * pad).max(36.0))
+            .collect();
+        let total =
+            widths.iter().sum::<f32>() + caps.len() as f32 * (plus.size().x + 2.0 * gap) + slot_w;
+        let mut x = rect.center().x - total / 2.0;
+        let y = rect.top() + 14.0;
+        for (g, w) in caps.into_iter().zip(widths) {
+            let r = Rect::from_min_size(Pos2::new(x, y), vec2(w, h));
+            // Base mais escura embaixo dá a cara de tecla física.
+            painter.rect_filled(r.translate(vec2(0.0, 3.0)), 7.0, ACCENT_STRONG);
+            painter.rect_filled(r, 7.0, ACCENT);
+            painter.galley(r.center() - g.size() / 2.0, g, egui::Color32::WHITE);
+            x += w + gap;
+            painter.galley(
+                Pos2::new(x, r.center().y - plus.size().y / 2.0),
+                plus.clone(),
+                pal.text_muted,
+            );
+            x += plus.size().x + gap;
+        }
+        let slot = Rect::from_min_size(Pos2::new(x, y), vec2(slot_w, h + 3.0));
+        dashed_rect(painter, slot, pal.text_muted);
+        (
+            "Solte para confirmar",
+            "ou aperte mais teclas para a combinação",
+        )
+    };
+    let y = rect.bottom() - 36.0;
+    painter.text(
+        Pos2::new(rect.center().x, y),
+        Align2::CENTER_TOP,
+        title,
+        FontId::proportional(14.0),
+        pal.text,
+    );
+    painter.text(
+        Pos2::new(rect.center().x, y + 20.0),
+        Align2::CENTER_TOP,
+        hint,
+        FontId::proportional(12.0),
+        pal.text_muted,
+    );
+}
+
+/// Contorno tracejado de um retângulo.
+fn dashed_rect(painter: &egui::Painter, r: Rect, color: egui::Color32) {
+    let [a, b, c, d] = [
+        r.left_top(),
+        r.right_top(),
+        r.right_bottom(),
+        r.left_bottom(),
+    ];
+    for (p, q) in [(a, b), (b, c), (c, d), (d, a)] {
+        painter.extend(Shape::dashed_line(
+            &[p, q],
+            Stroke::new(1.5, color),
+            4.0,
+            3.0,
+        ));
+    }
+}
+
+/// Contorno tracejado de um círculo.
+fn dashed_circle(painter: &egui::Painter, c: Pos2, r: f32, color: egui::Color32) {
+    const N: usize = 32;
+    let at = |k: usize| {
+        let t = k as f32 / N as f32 * std::f32::consts::TAU;
+        c + vec2(t.cos(), t.sin()) * r
+    };
+    for i in (0..N).step_by(2) {
+        painter.line_segment([at(i), at(i + 1)], Stroke::new(1.5, color));
+    }
+}
+
+/// Teclado pequeno: moldura e três fileiras de teclas.
+fn keyboard_icon(painter: &egui::Painter, c: Pos2) {
+    let body = Rect::from_center_size(c, vec2(26.0, 17.0));
+    painter.rect_stroke(
+        body,
+        3.0,
+        Stroke::new(1.6, ACCENT),
+        egui::StrokeKind::Middle,
+    );
+    for (row, (n, y)) in [(4, -4.0), (4, 0.5)].into_iter().enumerate() {
+        let off = if row == 1 { 1.5 } else { 0.0 };
+        for i in 0..n {
+            let x = -7.5 + i as f32 * 5.0 + off;
+            painter.rect_filled(
+                Rect::from_center_size(c + vec2(x, y), vec2(2.4, 2.4)),
+                0.5,
+                ACCENT,
+            );
+        }
+    }
+    painter.line_segment(
+        [c + vec2(-5.0, 5.0), c + vec2(5.0, 5.0)],
+        Stroke::new(1.6, ACCENT),
+    );
 }
 
 pub fn from_egui(key: egui::Key) -> Option<Key> {
@@ -181,8 +463,9 @@ mod tests {
     #[test]
     fn plain_key() {
         let mut c = Capture::default();
+        assert_eq!(c.feed(&[key(egui::Key::Space, true)]), None);
         assert_eq!(
-            c.feed(&[key(egui::Key::Space, true)]),
+            c.feed(&[key(egui::Key::Space, false)]),
             Some(Key::Space.into())
         );
     }
@@ -191,10 +474,41 @@ mod tests {
     fn modifier_plus_key() {
         let mut c = Capture::default();
         assert_eq!(c.feed(&[key(egui::Key::ControlLeft, true)]), None);
+        assert_eq!(c.feed(&[key(egui::Key::S, true)]), None);
+        assert_eq!(c.feed(&[key(egui::Key::S, false)]), None);
         assert_eq!(
-            c.feed(&[key(egui::Key::S, true)]),
+            c.feed(&[key(egui::Key::ControlLeft, false)]),
             Some(KeyCombo(vec![Key::LeftCtrl, Key::S]))
         );
+    }
+
+    #[test]
+    fn two_plain_keys() {
+        let mut c = Capture::default();
+        assert_eq!(c.feed(&[key(egui::Key::A, true)]), None);
+        assert_eq!(c.feed(&[key(egui::Key::B, true)]), None);
+        assert_eq!(c.keys(), [Key::A, Key::B]);
+        assert_eq!(
+            c.feed(&[key(egui::Key::A, false), key(egui::Key::B, false)]),
+            Some(KeyCombo(vec![Key::A, Key::B]))
+        );
+    }
+
+    #[test]
+    fn modifiers_go_first() {
+        let mut c = Capture::default();
+        c.feed(&[key(egui::Key::S, true), key(egui::Key::ControlLeft, true)]);
+        assert_eq!(
+            c.feed(&[key(egui::Key::S, false), key(egui::Key::ControlLeft, false)]),
+            Some(KeyCombo(vec![Key::LeftCtrl, Key::S]))
+        );
+    }
+
+    #[test]
+    fn ignores_release_of_key_held_before() {
+        let mut c = Capture::default();
+        assert_eq!(c.feed(&[key(egui::Key::Enter, false)]), None);
+        assert!(c.keys().is_empty());
     }
 
     #[test]
