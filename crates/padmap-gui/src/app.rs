@@ -322,7 +322,7 @@ impl PadmapApp {
                     .inner_margin(Margin::symmetric(8, 3))
                     .show(ui, |ui| {
                         ui.label(
-                            RichText::new(k.name().to_uppercase())
+                            RichText::new(capture::key_label(*k).to_uppercase())
                                 .size(11.0)
                                 .strong()
                                 .color(Color32::WHITE),
@@ -412,9 +412,13 @@ impl PadmapApp {
             self.set_slot(slot, Some(combo));
         } else if let Some(action) = action {
             self.capture = None;
-            if let capture::ModalAction::Clear = action {
-                self.push_log(format!("{}: livre", slot.label()));
-                self.set_slot(slot, None);
+            match action {
+                capture::ModalAction::Cancel => {}
+                capture::ModalAction::Clear => {
+                    self.push_log(format!("{}: livre", slot.label()));
+                    self.set_slot(slot, None);
+                }
+                capture::ModalAction::Pick(combo) => self.set_slot(slot, Some(combo)),
             }
         }
     }

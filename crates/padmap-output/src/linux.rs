@@ -14,13 +14,12 @@ pub struct UinputSink {
 
 impl UinputSink {
     pub fn new() -> Result<Self, OutputError> {
-        let mut keys: AttributeSet<KeyCode> = Key::ALL
+        // Inclui BTN_LEFT/RIGHT/MIDDLE (os cliques): sem um botão de mouse o
+        // sistema não trata o dispositivo como apontador e ignora os eixos.
+        let keys: AttributeSet<KeyCode> = Key::ALL
             .iter()
             .map(|&k| KeyCode(linux_keycode(k)))
             .collect();
-        // Sem um botão de mouse o sistema não trata o dispositivo como
-        // apontador e ignora os eixos relativos.
-        keys.insert(KeyCode::BTN_LEFT);
         let rel: AttributeSet<RelativeAxisCode> =
             [RelativeAxisCode::REL_X, RelativeAxisCode::REL_Y]
                 .into_iter()

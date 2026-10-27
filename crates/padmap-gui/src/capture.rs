@@ -72,10 +72,12 @@ impl Capture {
     }
 }
 
-/// O que o usuário escolheu no modal de captura, além de apertar uma tecla.
+/// O que o usuário escolheu na captura, além de apertar teclas no teclado.
 pub enum ModalAction {
     Cancel,
     Clear,
+    /// Clicou num botão do mouse (com os modificadores que estavam seguros).
+    Pick(KeyCombo),
 }
 
 /// Modal de captura de um botão: cabeçalho com o nome, tecla atual, área das
@@ -164,6 +166,10 @@ pub fn modal(
                     });
                     ui.add_space(12.0);
                     keys_ui(ui, pal, held);
+                    ui.add_space(14.0);
+                    if let Some(combo) = mouse_buttons_ui(ui, pal, held) {
+                        action = Some(ModalAction::Pick(combo));
+                    }
                 });
 
             let top = ui.cursor().top();
@@ -217,6 +223,9 @@ pub fn key_label(k: Key) -> String {
         Key::RightAlt => "AltGr".into(),
         Key::LeftMeta => "Win".into(),
         Key::RightMeta => "Win dir.".into(),
+        Key::MouseLeft => "Mouse esq.".into(),
+        Key::MouseRight => "Mouse dir.".into(),
+        Key::MouseMiddle => "Mouse meio".into(),
         _ => k.name().to_uppercase(),
     }
 }
@@ -227,6 +236,124 @@ pub fn combo_label(c: &KeyCombo) -> String {
         .map(|&k| key_label(k))
         .collect::<Vec<_>>()
         .join("+")
+}
+
+/// Divisória "ou um botão do mouse" e os três botões. Clique de mouse não dá
+/// para capturar pelo teclado, então ele é escolhido aqui. Retorna a combinação
+/// com as teclas que estavam seguras (ex.: `Ctrl+MouseLeft`).
+pub fn mouse_buttons_ui(ui: &mut Ui, pal: &Palette, held: &[Key]) -> Option<KeyCombo> {
+    let w = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(vec2(w, 14.0), Sense::hover());
+    let label = ui.painter().layout_no_wrap(
+        "ou um botão do mouse".into(),
+        FontId::proportional(11.0),
+        pal.text_muted,
+    );
+    let gap = label.size().x / 2.0 + 8.0;
+    let y = rect.center().y;
+    let line = Stroke::new(1.0, pal.bar_border);
+    ui.painter()
+        .hline(rect.left()..=rect.center().x - gap, y, line);
+    ui.painter()
+        .hline(rect.center().x + gap..=rect.right(), y, line);
+    ui.painter()
+        .galley(rect.center() - label.size() / 2.0, label, pal.text_muted);
+    ui.add_space(8.0);
+
+    let mut picked = None;
+    let bw = (w - 2.0 * 6.0) / 3.0;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        for (key, text) in [
+            (Key::MouseLeft, "Esquerdo"),
+            (Key::MouseRight, "Direito"),
+            (Key::MouseMiddle, "Meio"),
+        ] {
+            let (r, resp) = ui.allocate_exact_size(vec2(bw, 50.0), Sense::click());
+            let hot = resp.hovered();
+            let (fill, border, color) = if hot {
+                (ACCENT_STRONG, ACCENT_STRONG, egui::Color32::WHITE)
+            } else {
+                (pal.free_bg, pal.free_border, pal.text)
+            };
+            ui.painter().rect(
+                r,
+                8.0,
+                fill,
+                Stroke::new(1.0, border),
+                egui::StrokeKind::Inside,
+            );
+            mouse_icon(
+                ui.painter(),
+                r.center_top() + vec2(0.0, 17.0),
+                key,
+                hot,
+                pal,
+            );
+            ui.painter().text(
+                r.center_bottom() - vec2(0.0, 8.0),
+                Align2::CENTER_BOTTOM,
+                text,
+                FontId::proportional(12.0),
+                color,
+            );
+            if resp
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                let mut keys: Vec<Key> = held.iter().copied().filter(|k| *k != key).collect();
+                keys.push(key);
+                picked = Some(KeyCombo(keys));
+            }
+        }
+    });
+    ui.add_space(6.0);
+    ui.vertical_centered(|ui| {
+        ui.label(
+            RichText::new("Segure Ctrl, Shift ou Alt antes de clicar para combinar")
+                .size(11.0)
+                .color(pal.text_muted),
+        );
+    });
+    picked
+}
+
+/// Mouse pequeno, centrado em `c`, com o botão `key` em destaque.
+fn mouse_icon(painter: &egui::Painter, c: Pos2, key: Key, hot: bool, pal: &Palette) {
+    let (line, mark) = if hot {
+        (egui::Color32::WHITE, egui::Color32::WHITE)
+    } else {
+        (pal.text_muted, ACCENT)
+    };
+    let body = Rect::from_center_size(c, vec2(14.0, 20.0));
+    let stroke = Stroke::new(1.4, line);
+    let split = body.top() + 8.0;
+    match key {
+        Key::MouseLeft => painter.rect_filled(
+            Rect::from_min_max(body.left_top(), Pos2::new(c.x, split)),
+            egui::CornerRadius {
+                nw: 7,
+                ..Default::default()
+            },
+            mark,
+        ),
+        Key::MouseRight => painter.rect_filled(
+            Rect::from_min_max(Pos2::new(c.x, body.top()), Pos2::new(body.right(), split)),
+            egui::CornerRadius {
+                ne: 7,
+                ..Default::default()
+            },
+            mark,
+        ),
+        _ => painter.rect_filled(
+            Rect::from_center_size(Pos2::new(c.x, body.top() + 4.5), vec2(3.0, 5.0)),
+            1.5,
+            mark,
+        ),
+    };
+    painter.rect_stroke(body, 7.0, stroke, egui::StrokeKind::Middle);
+    painter.hline(body.x_range(), split, stroke);
+    painter.vline(c.x, body.top()..=split, stroke);
 }
 
 /// Altura fixa da área de captura, para o modal não pular entre os estados.

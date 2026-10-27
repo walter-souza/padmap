@@ -6,7 +6,7 @@
 //! Tudo é editado numa cópia; o perfil só muda em "Salvar Mapeamento".
 
 use crate::app::switch;
-use crate::capture::{keys_ui, Capture};
+use crate::capture::{combo_label, keys_ui, mouse_buttons_ui, Capture, ModalAction};
 use crate::diagram::{polar, wedge, Live};
 use crate::slots::stick_title;
 use crate::theme::{Palette, ACCENT, ACCENT_STRONG, SECTOR_COLORS};
@@ -416,9 +416,14 @@ impl StickEditor {
                 ui.allocate_exact_size(vec2(ui.available_width(), DIAL_H), Sense::click_and_drag());
             self.dial(ui, pal, live, rect, &resp);
             if let Some((i, capture)) = &self.capture {
-                let held = capture.keys().to_vec();
-                if capture_overlay(ui, pal, rect, *i, &held) {
-                    self.capture = None;
+                let (i, held) = (*i, capture.keys().to_vec());
+                match capture_overlay(ui, pal, rect, i, &held) {
+                    Some(ModalAction::Pick(combo)) => {
+                        self.draft.sectors[i].key = Some(combo);
+                        self.capture = None;
+                    }
+                    Some(_) => self.capture = None,
+                    None => {}
                 }
             }
         });
@@ -560,7 +565,7 @@ impl StickEditor {
             let text = b.sectors[i]
                 .key
                 .as_ref()
-                .map_or("—".to_owned(), |k| k.to_string().to_uppercase());
+                .map_or("—".to_owned(), |k| combo_label(k).to_uppercase());
             let g = painter.layout_no_wrap(text, FontId::monospace(10.0), pal.text);
             let chip = Rect::from_center_size(
                 polar(c, r_in * 0.68, b.center(i)),
@@ -1160,33 +1165,43 @@ fn list_row(ui: &mut Ui, pal: &Palette, text: &str, selected: bool, clickable: b
     resp
 }
 
-/// Cobre o círculo enquanto a tecla de um setor é capturada.
-/// Retorna `true` se a captura foi cancelada.
-fn capture_overlay(ui: &mut Ui, pal: &Palette, rect: Rect, sector: usize, held: &[Key]) -> bool {
+/// Cobre o círculo enquanto a tecla de um setor é capturada. Retorna
+/// `Cancel` se a captura foi cancelada ou `Pick` se um clique foi escolhido.
+fn capture_overlay(
+    ui: &mut Ui,
+    pal: &Palette,
+    rect: Rect,
+    sector: usize,
+    held: &[Key],
+) -> Option<ModalAction> {
     ui.painter()
         .rect_filled(rect.expand(8.0), 10.0, pal.bar.gamma_multiply(0.96));
-    let mut cancel = false;
+    let mut action = None;
     ui.scope_builder(
         UiBuilder::new()
             .max_rect(rect.shrink(16.0))
             .layout(Layout::top_down(Align::Center)),
         |ui| {
-            ui.add_space(rect.height() * 0.16);
+            ui.add_space(4.0);
             ui.label(
                 RichText::new(format!("Mapeando Região {}", sector + 1))
                     .size(16.0)
                     .strong()
                     .color(pal.text),
             );
-            ui.add_space(14.0);
+            ui.add_space(8.0);
             keys_ui(ui, pal, held);
-            ui.add_space(18.0);
+            ui.add_space(10.0);
+            if let Some(combo) = mouse_buttons_ui(ui, pal, held) {
+                action = Some(ModalAction::Pick(combo));
+            }
+            ui.add_space(10.0);
             if ui.button("Cancelar Mapeamento").clicked() {
-                cancel = true;
+                action = Some(ModalAction::Cancel);
             }
         },
     );
-    cancel
+    action
 }
 
 /// Arco grosso centrado no raio `r`, de `start` até `start + width` graus.

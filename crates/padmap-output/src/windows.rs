@@ -1,9 +1,12 @@
 use crate::codes::windows_scancode;
 use crate::{KeyAction, OutputError, OutputSink};
+use padmap_core::MouseButton;
 use std::mem::size_of;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
-    KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MOUSEEVENTF_MOVE, MOUSEINPUT,
+    KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+    MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN,
+    MOUSEEVENTF_RIGHTUP, MOUSEINPUT,
 };
 
 /// Injeta teclas com `SendInput` usando scancodes, que funcionam tanto em
@@ -27,7 +30,19 @@ impl OutputSink for SendInputSink {
             KeyAction::Press(k) => (k, false),
             KeyAction::Release(k) => (k, true),
         };
-        let (scan, extended) = windows_scancode(key);
+        if let Some(button) = key.mouse_button() {
+            let flags = match (button, up) {
+                (MouseButton::Left, false) => MOUSEEVENTF_LEFTDOWN,
+                (MouseButton::Left, true) => MOUSEEVENTF_LEFTUP,
+                (MouseButton::Right, false) => MOUSEEVENTF_RIGHTDOWN,
+                (MouseButton::Right, true) => MOUSEEVENTF_RIGHTUP,
+                (MouseButton::Middle, false) => MOUSEEVENTF_MIDDLEDOWN,
+                (MouseButton::Middle, true) => MOUSEEVENTF_MIDDLEUP,
+            };
+            return send_mouse(0, 0, flags)
+                .map_err(|e| OutputError::Send(format!("SendInput recusou {key} ({e})")));
+        }
+        let (scan, extended) = windows_scancode(key).expect("tecla de teclado tem scancode");
         let mut flags = KEYEVENTF_SCANCODE;
         if extended {
             flags |= KEYEVENTF_EXTENDEDKEY;
@@ -51,22 +66,25 @@ impl OutputSink for SendInputSink {
     }
 
     fn move_mouse(&mut self, dx: i32, dy: i32) -> Result<(), OutputError> {
-        let input = INPUT {
-            r#type: INPUT_MOUSE,
-            Anonymous: INPUT_0 {
-                mi: MOUSEINPUT {
-                    dx,
-                    dy,
-                    mouseData: 0,
-                    dwFlags: MOUSEEVENTF_MOVE,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        };
-        send_input(&input)
+        send_mouse(dx, dy, MOUSEEVENTF_MOVE)
             .map_err(|e| OutputError::Send(format!("SendInput recusou o movimento do mouse ({e})")))
     }
+}
+
+fn send_mouse(dx: i32, dy: i32, flags: u32) -> Result<(), std::io::Error> {
+    send_input(&INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx,
+                dy,
+                mouseData: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    })
 }
 
 fn send_input(input: &INPUT) -> Result<(), std::io::Error> {

@@ -11,9 +11,9 @@ use padmap_core::Key;
 /// Scancode PS/2 "set 1" e se é uma tecla estendida (prefixo E0).
 /// Usado com `SendInput` + `KEYEVENTF_SCANCODE`, que é o que jogos com
 /// DirectInput/Raw Input enxergam.
-pub fn windows_scancode(key: Key) -> (u16, bool) {
+pub fn windows_scancode(key: Key) -> Option<(u16, bool)> {
     use Key::*;
-    match key {
+    Some(match key {
         Escape => (0x01, false),
         Num1 => (0x02, false),
         Num2 => (0x03, false),
@@ -97,7 +97,9 @@ pub fn windows_scancode(key: Key) -> (u16, bool) {
         Delete => (0x53, true),
         LeftMeta => (0x5B, true),
         RightMeta => (0x5C, true),
-    }
+        // Cliques não são teclas do teclado; o sink manda como mouse.
+        MouseLeft | MouseRight | MouseMiddle => return None,
+    })
 }
 
 /// Código `KEY_*` do Linux (linux/input-event-codes.h).
@@ -187,13 +189,17 @@ pub fn linux_keycode(key: Key) -> u16 {
         Delete => 111,
         LeftMeta => 125,
         RightMeta => 126,
+        // BTN_LEFT/RIGHT/MIDDLE: para o uinput, botões de mouse são teclas.
+        MouseLeft => 0x110,
+        MouseRight => 0x111,
+        MouseMiddle => 0x112,
     }
 }
 
 /// Virtual keycode do macOS (`kVK_*` em HIToolbox/Events.h).
-pub fn macos_keycode(key: Key) -> u16 {
+pub fn macos_keycode(key: Key) -> Option<u16> {
     use Key::*;
-    match key {
+    Some(match key {
         A => 0x00,
         S => 0x01,
         D => 0x02,
@@ -277,7 +283,9 @@ pub fn macos_keycode(key: Key) -> u16 {
         Right => 0x7C,
         Down => 0x7D,
         Up => 0x7E,
-    }
+        // Cliques não são teclas do teclado; o sink manda como mouse.
+        MouseLeft | MouseRight | MouseMiddle => return None,
+    })
 }
 
 #[cfg(test)]
@@ -285,17 +293,30 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
 
-    fn assert_unique<T: std::hash::Hash + Eq + std::fmt::Debug>(f: impl Fn(Key) -> T) {
+    /// Só as teclas com código: cliques não têm código de teclado no Windows
+    /// nem no macOS.
+    fn assert_unique<T: std::hash::Hash + Eq + std::fmt::Debug>(f: impl Fn(Key) -> Option<T>) {
         let mut seen = HashSet::new();
         for &k in Key::ALL {
-            assert!(seen.insert(f(k)), "código repetido para {k}");
+            if let Some(code) = f(k) {
+                assert!(seen.insert(code), "código repetido para {k}");
+            }
         }
     }
 
     #[test]
     fn codes_are_unique_per_platform() {
         assert_unique(windows_scancode);
-        assert_unique(linux_keycode);
+        assert_unique(|k| Some(linux_keycode(k)));
         assert_unique(macos_keycode);
+    }
+
+    #[test]
+    fn only_clicks_lack_keyboard_codes() {
+        for &k in Key::ALL {
+            let click = k.mouse_button().is_some();
+            assert_eq!(windows_scancode(k).is_none(), click, "{k}");
+            assert_eq!(macos_keycode(k).is_none(), click, "{k}");
+        }
     }
 }

@@ -1,6 +1,7 @@
 //! Teclas de saída, descritas por posição física (layout US), e combinações
 //! como `Ctrl+Shift+S`. Cada backend de saída traduz `Key` para o código nativo
-//! do seu sistema operacional.
+//! do seu sistema operacional. Os botões do mouse também são `Key`, para valerem
+//! em qualquer mapeamento e combinação (`Ctrl+MouseLeft`).
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
@@ -81,6 +82,28 @@ keys! {
     Comma => "Comma" | ",",
     Period => "Period" | ".",
     Slash => "Slash" | "/",
+    MouseLeft => "MouseLeft" | "Mouse1" | "LMB",
+    MouseRight => "MouseRight" | "Mouse2" | "RMB",
+    MouseMiddle => "MouseMiddle" | "Mouse3" | "MMB",
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+}
+
+impl Key {
+    /// O botão do mouse, se a tecla for um clique.
+    pub fn mouse_button(self) -> Option<MouseButton> {
+        match self {
+            Key::MouseLeft => Some(MouseButton::Left),
+            Key::MouseRight => Some(MouseButton::Right),
+            Key::MouseMiddle => Some(MouseButton::Middle),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for Key {
@@ -164,6 +187,15 @@ mod tests {
         let c: KeyCombo = "Ctrl+Shift+S".parse().unwrap();
         assert_eq!(c.0, vec![Key::LeftCtrl, Key::LeftShift, Key::S]);
         assert_eq!(c.to_string(), "LCtrl+LShift+S");
+    }
+
+    #[test]
+    fn mouse_buttons_are_keys() {
+        let c: KeyCombo = "Ctrl+Mouse1".parse().unwrap();
+        assert_eq!(c.0, vec![Key::LeftCtrl, Key::MouseLeft]);
+        assert_eq!(c.to_string(), "LCtrl+MouseLeft");
+        assert_eq!(Key::MouseRight.mouse_button(), Some(MouseButton::Right));
+        assert_eq!(Key::Space.mouse_button(), None);
     }
 
     #[test]

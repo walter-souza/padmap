@@ -404,6 +404,19 @@ sectors=[{start=45.0,key='Up'}]
     }
 
     #[test]
+    fn mouse_click_is_counted_like_a_key() {
+        let mut m = mapper("name='t'\n[buttons]\nsouth='MouseLeft'\neast='MouseLeft'\n");
+        assert_eq!(
+            m.handle(InputEvent::ButtonDown(Button::South)),
+            [Press(Key::MouseLeft)]
+        );
+        assert!(m.handle(InputEvent::ButtonDown(Button::East)).is_empty());
+        assert!(m.handle(InputEvent::ButtonUp(Button::South)).is_empty());
+        // Desativar no meio do arrasto solta o clique.
+        assert_eq!(m.release_all(), [Release(Key::MouseLeft)]);
+    }
+
+    #[test]
     fn release_all_clears_everything() {
         let mut m =
             mapper("name='t'\n[buttons]\nsouth='Space'\n[axes.right_trigger]\npositive='LShift'\n");

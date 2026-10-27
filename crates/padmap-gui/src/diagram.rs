@@ -4,6 +4,7 @@
 //! Tudo é desenhado num espaço de 1000 × 640 unidades e escalado para caber na
 //! janela. Clicar numa etiqueta ou numa parte do controle devolve um `Click`.
 
+use crate::capture::combo_label;
 use crate::slots::{stick_click, stick_short, stick_title, Slot};
 use crate::theme::{Palette, ACCENT, ACCENT_STRONG, ACTIVE};
 use eframe::egui::{
@@ -697,7 +698,7 @@ impl Stage<'_> {
         let key = if capturing {
             "PRESSIONE…".to_owned()
         } else {
-            combo.map_or("LIVRE".to_owned(), |c| c.to_string().to_uppercase())
+            combo.map_or("LIVRE".to_owned(), |c| combo_label(c).to_uppercase())
         };
 
         let key_g = self.text(&key, 10.0, chip_text);
@@ -783,7 +784,7 @@ impl Stage<'_> {
         let active: Vec<String> = sectors
             .iter()
             .filter_map(|&i| binding?.sectors[i].key.as_ref())
-            .map(|c| c.to_string().to_uppercase())
+            .map(|c| combo_label(c).to_uppercase())
             .collect();
         let mouse = self.live.stick_mouse(self.profile, stick);
         let engaged = self.live.stick_engaged(self.profile, stick);

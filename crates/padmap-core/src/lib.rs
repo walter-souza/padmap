@@ -9,7 +9,7 @@ pub mod profile;
 pub mod stick;
 
 pub use gamepad::{Axis, Button, InputEvent};
-pub use key::{Key, KeyCombo};
+pub use key::{Key, KeyCombo, MouseButton};
 pub use mapper::{KeyAction, Mapper};
 pub use profile::{AxisBinding, Profile, ProfileError, Settings};
 pub use stick::{MouseSettings, Sector, Stick, StickBinding, StickMode};

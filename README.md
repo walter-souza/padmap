@@ -29,8 +29,11 @@ cargo run --release -p padmap-gui
   enviada fica destacada. O controle conectado aparece no topo.
 - **Mapear:** cada botão tem uma etiqueta ligada a ele por uma linha. Clique na
   etiqueta (ou no próprio botão do desenho), segure a tecla ou as teclas juntas
-  (`Ctrl+S`, `A+B`) e solte: a combinação vale ao soltar tudo. Botão direito na
-  etiqueta, ou "Deixar livre" no modal, deixa o botão livre.
+  (`Ctrl+S`, `A+B`) e solte: a combinação vale ao soltar tudo. Para um clique
+  do mouse, use os botões Esquerdo, Direito ou Meio do modal (segure Ctrl,
+  Shift ou Alt antes para combinar). O clique fica apertado enquanto o botão do
+  controle estiver apertado, então dá para arrastar. Botão direito na etiqueta,
+  ou "Deixar livre" no modal, deixa o botão livre.
 - **Sticks:** os dois círculos embaixo mostram em amarelo o setor que está
   acionando uma tecla. Clique num deles (ou em LS / RS) para abrir o
   **Mapeamento do Stick**, que tem dois modos (seletor no topo):
@@ -127,7 +130,9 @@ Eixos: `left_x left_y right_x right_y left_trigger right_trigger`
 Teclas: letras, `0`-`9`, `F1`-`F12`, `Space Enter Escape Tab Backspace
 CapsLock Insert Delete Home End PageUp PageDown Up Down Left Right`,
 modificadores `Shift/LShift/RShift Ctrl/LCtrl/RCtrl Alt/LAlt/RAlt/AltGr
-Win/Meta/Cmd` e pontuação (`Minus Equal Comma Period Slash ...`).
+Win/Meta/Cmd`, pontuação (`Minus Equal Comma Period Slash ...`) e os cliques
+do mouse `MouseLeft/Mouse1 MouseRight/Mouse2 MouseMiddle/Mouse3`, que combinam
+como qualquer tecla (`Ctrl+MouseLeft`).
 
 ## Compilando
 
