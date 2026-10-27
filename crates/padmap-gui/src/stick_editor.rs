@@ -120,6 +120,11 @@ impl StickEditor {
         }
     }
 
+    /// Esperando uma tecla para algum setor.
+    pub fn capturing(&self) -> bool {
+        self.capture.is_some()
+    }
+
     fn axes(&self) -> (Axis, Axis) {
         self.draft.axes(self.stick)
     }

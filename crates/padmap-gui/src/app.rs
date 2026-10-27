@@ -35,6 +35,12 @@ pub struct PadmapApp {
 impl PadmapApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         theme::install(&cc.egui_ctx);
+        // Os atalhos do egui (Ctrl+Q fecha, Ctrl+/−/0 dão zoom) pegariam as
+        // combinações que o usuário mapeia ou que o próprio padmap envia.
+        cc.egui_ctx.options_mut(|o| {
+            o.quit_shortcuts.clear();
+            o.zoom_with_keyboard = false;
+        });
         let theme = cc
             .storage
             .and_then(|s| s.get_string(THEME_KEY))
@@ -516,6 +522,14 @@ impl eframe::App for PadmapApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_worker();
         let pal = theme::palette(self.theme);
+
+        // Capturando uma tecla, Alt+F4 e afins viram mapeamento, não fecham a janela.
+        let capturing =
+            self.capture.is_some() || self.stick_editor.as_ref().is_some_and(|e| e.capturing());
+        if capturing && ui.ctx().input(|i| i.viewport().close_requested()) {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
 
         let bar = |top: bool| {
             egui::Frame::new()
