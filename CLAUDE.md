@@ -2,7 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-padmap mapeia qualquer controle (Xbox, PlayStation, Switch, genérico) para teclado. Workspace Rust; Windows é a plataforma principal, Linux e macOS já compilam. Código, comentários, mensagens de erro, log e commits são em português.
+padmap mapeia qualquer controle (Xbox, PlayStation, Switch, genérico) para teclado. Workspace Rust; Windows é a plataforma principal, Linux e macOS já compilam. Código, comentários, mensagens de erro e log são em português.
+
+## Commits
+
+Só faça commit com aprovação explícita do usuário, pedida a cada commit. Proponha a mensagem e espere o "sim" antes de rodar `git commit`.
+
+Mensagens de commit em inglês, no padrão Conventional Commits: `<type>(<scope opcional>): <descrição>`, com tipos como `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`, `build` e `perf`. A descrição vai no imperativo, em minúsculas e sem ponto final. Use o crate como escopo quando a mudança for de um só (ex.: `feat(gui): add stick sensitivity window`). Mudanças incompatíveis levam `!` depois do tipo ou um rodapé `BREAKING CHANGE:`. Os commits anteriores a esta regra estão em português.
 
 ## Comandos
 
@@ -37,6 +43,10 @@ Fluxo: `GamepadSource::next_event` (padmap-input) → `Mapper::handle` (padmap-c
 - **padmap-output**: trait `KeyboardSink`, escolhido em tempo de compilação por `platform_sink()`; `DryRunSink` só loga. `codes.rs` tem as três tabelas `Key` → código nativo fora dos `cfg`, para que todas compilem e sejam testadas em qualquer SO. No Windows usa scancodes (`KEYEVENTF_SCANCODE`), não teclas virtuais, porque jogos com DirectInput/Raw Input ignoram `wVk`.
 - **padmap-gui** (egui/eframe): `worker.rs` roda a leitura do controle e o `Mapper` numa thread própria e fala com a interface por canais `Command`/`Status`. Isso tem de continuar assim: a janela do egui só redesenha quando algo muda e para sem foco, que é quando o jogo está na frente. A interface só desenha e edita o `Profile`, e manda o perfil inteiro com `Command::SetProfile`. `diagram.rs` desenha o controle num espaço fixo de 1000×640 escalado para a janela; `slots.rs` define `Slot` (botão ou sentido de eixo), a unidade que recebe uma tecla.
 - **padmap-cli**: o mesmo fluxo, rodando direto no terminal.
+
+## Interface: modo claro e escuro
+
+Toda mudança de layout ou de cor na interface precisa funcionar nos dois temas. Pegue as cores da `Palette` do tema atual (`theme::palette`, com `LIGHT` e `DARK` em `padmap-gui/src/theme.rs`) em vez de escrever `Color32` direto no código. Uma cor nova que muda com o tema entra nas duas paletas. As constantes compartilhadas (`ACCENT`, `ACTIVE`, `GOOD`, `BAD`) valem para os dois temas. Cor fixa só vale onde o fundo não muda com o tema: o desenho do controle (as constantes do topo de `diagram.rs`), que é escuro nos dois modos, e texto branco sobre botões de destaque. O que muda com o tema é o fundo, as barras e as etiquetas livres. Antes de dar a mudança por pronta, confira nos dois temas (botão sol/lua no topo). As capturas em `docs/` (`tela-principal.png` e `tela-principal-escura.png`) mostram como cada tema deve ficar.
 
 ## Invariantes que cruzam arquivos
 
