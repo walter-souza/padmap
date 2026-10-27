@@ -38,6 +38,12 @@ Fluxo: `GamepadSource::next_event` -> `Mapper::handle` -> `Vec<KeyAction>` -> `K
   quando ambos forem soltos.
 - **Histerese nos eixos.** Pressiona em `threshold`, solta em
   `threshold * release_ratio`.
+- **Sticks por ângulo.** Cada stick é um círculo dividido em setores
+  (`padmap-core/src/stick.rs`), cada um com sua tecla. Além da histerese no
+  raio, há 3° de histerese no ângulo: um setor só aciona 3° para dentro da
+  borda e só solta 3° para fora, então a divisa não pisca nem aciona dois
+  setores juntos. Os eixos soltos dos sticks em perfis antigos são convertidos
+  em setores ao carregar.
 - **Eventos em segundo plano.** O hint `SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS`
   é ligado porque o foco está sempre no jogo, não no padmap.
 - **Mapeamento fora da interface.** A janela do egui só é redesenhada quando

@@ -31,7 +31,12 @@ cargo run --release -p padmap-gui
   etiqueta (ou no próprio botão do desenho) e aperte a tecla ou combinação, como
   `Ctrl+S`. Botão direito na etiqueta deixa o botão livre.
 - **Sticks:** os dois círculos embaixo mostram em amarelo o setor que está
-  acionando uma tecla. Clique em LS ou RS para escolher a tecla de cada direção.
+  acionando uma tecla. Clique num deles (ou em LS / RS) para abrir o
+  **Mapeamento por Ângulo**: o círculo do stick dividido em setores, cada um com
+  sua tecla. Arraste as alças para mudar as divisas, clique num setor e aperte a
+  tecla, botão direito deixa o setor livre. Também tem presets de 4 e 8
+  direções, a zona morta do stick, o disparo compartilhado (setores vizinhos
+  acionam juntos na diagonal) e os eixos que o stick usa.
 - **Testar sem risco:** com "Simulação" ligada, "Ativar mapeamento" só mostra
   no log as teclas que seriam enviadas. Desligue para enviar de verdade. O log
   abre pelo botão "Log" no rodapé.
@@ -42,8 +47,8 @@ cargo run --release -p padmap-gui
 
 ![Tela principal no modo escuro](docs/tela-principal-escura.png)
 
-A sensibilidade dos sticks e gatilhos continua no perfil (`axis_threshold` e
-`release_ratio`); ela vai ganhar uma janela própria na interface.
+A sensibilidade dos gatilhos e a histerese continuam no perfil
+(`axis_threshold` e `release_ratio`).
 
 O mapeamento continua funcionando com a janela minimizada ou com o jogo em primeiro plano.
 
@@ -72,9 +77,17 @@ release_ratio = 0.8    # solta abaixo de 0.5 * 0.8 (evita "piscar")
 south = "Space"
 start = "Ctrl+S"       # combinações com +
 
-[axes.left_x]
-negative = "A"
-positive = "D"
+# Ângulos em graus, anti-horário a partir da direita (90 = cima). Cada setor
+# vai do seu start até o start do próximo; o último volta ao primeiro.
+[sticks.left]
+deadzone = 0.5         # opcional; sem ele vale axis_threshold
+shared = true          # vizinhos se sobrepõem: a diagonal aciona W e D
+sectors = [
+    { start = 45.0, key = "W" },
+    { start = 135.0, key = "A" },
+    { start = 225.0, key = "S" },
+    { start = 315.0, key = "D" },
+]
 
 [axes.right_trigger]
 positive = "LShift"
@@ -84,6 +97,10 @@ threshold = 0.3
 Botões: `south east west north back guide start left_stick right_stick
 left_shoulder right_shoulder dpad_up dpad_down dpad_left dpad_right misc1
 left_paddle1 left_paddle2 right_paddle1 right_paddle2 touchpad`.
+
+Sticks: `left right`. Por padrão usam `left_x/left_y` e `right_x/right_y`;
+`x_axis` e `y_axis` trocam os eixos. Perfis antigos com `[axes.left_x]` e
+afins continuam abrindo: viram quatro setores com disparo compartilhado.
 
 Eixos: `left_x left_y right_x right_y left_trigger right_trigger`
 (Y negativo é para cima).

@@ -15,6 +15,20 @@ pub const ACTIVE: Color32 = rgb(0xEAB308);
 pub const GOOD: Color32 = rgb(0x22C55E);
 pub const BAD: Color32 = rgb(0xDC2626);
 
+/// Cor de cada setor no editor de stick, na ordem dos setores.
+pub const SECTOR_COLORS: [Color32; 10] = [
+    rgb(0x3B82F6),
+    rgb(0x22C55E),
+    rgb(0xEF4444),
+    rgb(0x84CC16),
+    rgb(0xEC4899),
+    rgb(0x06B6D4),
+    rgb(0xA855F7),
+    rgb(0xF97316),
+    rgb(0xF59E0B),
+    rgb(0x14B8A6),
+];
+
 pub struct Palette {
     /// Fundo da área central.
     pub bg: Color32,
@@ -44,6 +58,11 @@ pub struct Palette {
     pub switch_off: Color32,
     pub toggle_bg: Color32,
     pub toggle_on: Color32,
+    /// Faixa de título das janelas modais.
+    pub header_bg: Color32,
+    /// Disco do editor de stick e as linhas tracejadas sobre ele.
+    pub dial_bg: Color32,
+    pub dial_line: Color32,
     // Controle.
     pub body: Color32,
     pub body_stroke: Color32,
@@ -79,6 +98,9 @@ pub const LIGHT: Palette = Palette {
     switch_off: rgb(0xD5DBE5),
     toggle_bg: rgb(0xEEF1F5),
     toggle_on: rgb(0xFFFFFF),
+    header_bg: rgb(0x1E2433),
+    dial_bg: rgb(0xEEF2F7),
+    dial_line: rgb(0xC3CCD9),
     body: rgb(0x1A1E2E),
     body_stroke: rgb(0x3E4766),
     trigger: rgb(0x2A2F44),
@@ -113,6 +135,9 @@ pub const DARK: Palette = Palette {
     switch_off: rgb(0x26345A),
     toggle_bg: rgb(0x141B2D),
     toggle_on: rgb(0x26345A),
+    header_bg: rgb(0x141B2D),
+    dial_bg: rgb(0x121828),
+    dial_line: rgb(0x2E3A55),
     body: rgb(0x1A1E2E),
     body_stroke: rgb(0x4A5578),
     trigger: rgb(0x2A2F44),

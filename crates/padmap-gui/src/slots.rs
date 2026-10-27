@@ -1,20 +1,19 @@
-//! O que pode receber uma tecla no perfil: um botão ou um sentido de um eixo.
+//! O que pode receber uma tecla na tela principal: um botão ou um gatilho.
+//! Os sticks são mapeados por setores, no editor de stick.
 
-use padmap_core::{Axis, Button, KeyCombo, Profile};
+use padmap_core::{Axis, Button, KeyCombo, Profile, Stick};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Slot {
     Button(Button),
-    AxisNeg(Axis),
-    AxisPos(Axis),
+    Trigger(Axis),
 }
 
 impl Slot {
     pub fn get(self, p: &Profile) -> Option<&KeyCombo> {
         match self {
             Slot::Button(b) => p.buttons.get(&b),
-            Slot::AxisNeg(a) => p.axes.get(&a)?.negative.as_ref(),
-            Slot::AxisPos(a) => p.axes.get(&a)?.positive.as_ref(),
+            Slot::Trigger(a) => p.axes.get(&a)?.positive.as_ref(),
         }
     }
 
@@ -28,13 +27,9 @@ impl Slot {
                     p.buttons.remove(&b);
                 }
             },
-            Slot::AxisNeg(a) | Slot::AxisPos(a) => {
+            Slot::Trigger(a) => {
                 let binding = p.axes.entry(a).or_default();
-                if matches!(self, Slot::AxisNeg(_)) {
-                    binding.negative = combo;
-                } else {
-                    binding.positive = combo;
-                }
+                binding.positive = combo;
                 if binding.negative.is_none() && binding.positive.is_none() {
                     p.axes.remove(&a);
                 }
@@ -45,21 +40,8 @@ impl Slot {
     pub fn label(self) -> &'static str {
         match self {
             Slot::Button(b) => button_label(b),
-            Slot::AxisNeg(a) => match a {
-                Axis::LeftX => "Stick esquerdo ←",
-                Axis::LeftY => "Stick esquerdo ↑",
-                Axis::RightX => "Stick direito ←",
-                Axis::RightY => "Stick direito ↑",
-                Axis::LeftTrigger | Axis::RightTrigger => "(não usado)",
-            },
-            Slot::AxisPos(a) => match a {
-                Axis::LeftX => "Stick esquerdo →",
-                Axis::LeftY => "Stick esquerdo ↓",
-                Axis::RightX => "Stick direito →",
-                Axis::RightY => "Stick direito ↓",
-                Axis::LeftTrigger => "Gatilho esquerdo (LT / L2)",
-                Axis::RightTrigger => "Gatilho direito (RT / R2)",
-            },
+            Slot::Trigger(Axis::LeftTrigger) => "Gatilho esquerdo (LT / L2)",
+            Slot::Trigger(_) => "Gatilho direito (RT / R2)",
         }
     }
 }
@@ -90,6 +72,28 @@ pub fn button_label(b: Button) -> &'static str {
     }
 }
 
+pub fn stick_title(stick: Stick) -> &'static str {
+    match stick {
+        Stick::Left => "Stick esquerdo",
+        Stick::Right => "Stick direito",
+    }
+}
+
+pub fn stick_short(stick: Stick) -> &'static str {
+    match stick {
+        Stick::Left => "LS",
+        Stick::Right => "RS",
+    }
+}
+
+/// Botão do clique do stick (L3 / R3).
+pub fn stick_click(stick: Stick) -> Button {
+    match stick {
+        Stick::Left => Button::LeftStick,
+        Stick::Right => Button::RightStick,
+    }
+}
+
 /// Todos os botões e eixos, agrupados. Hoje só os testes usam a lista.
 #[cfg(test)]
 pub const GROUPS: &[(&str, &[Slot])] = &[
@@ -116,22 +120,14 @@ pub const GROUPS: &[(&str, &[Slot])] = &[
         &[
             Slot::Button(Button::LeftShoulder),
             Slot::Button(Button::RightShoulder),
-            Slot::AxisPos(Axis::LeftTrigger),
-            Slot::AxisPos(Axis::RightTrigger),
+            Slot::Trigger(Axis::LeftTrigger),
+            Slot::Trigger(Axis::RightTrigger),
         ],
     ),
     (
         "Sticks",
         &[
-            Slot::AxisNeg(Axis::LeftY),
-            Slot::AxisPos(Axis::LeftY),
-            Slot::AxisNeg(Axis::LeftX),
-            Slot::AxisPos(Axis::LeftX),
             Slot::Button(Button::LeftStick),
-            Slot::AxisNeg(Axis::RightY),
-            Slot::AxisPos(Axis::RightY),
-            Slot::AxisNeg(Axis::RightX),
-            Slot::AxisPos(Axis::RightX),
             Slot::Button(Button::RightStick),
         ],
     ),
@@ -162,11 +158,14 @@ mod tests {
     use padmap_core::Key;
 
     #[test]
-    fn set_and_clear_axis_direction() {
+    fn set_and_clear_trigger() {
         let mut p = Profile::from_toml("name='t'").unwrap();
-        Slot::AxisPos(Axis::LeftX).set(&mut p, Some(Key::D.into()));
-        assert_eq!(Slot::AxisPos(Axis::LeftX).get(&p), Some(&Key::D.into()));
-        Slot::AxisPos(Axis::LeftX).set(&mut p, None);
+        Slot::Trigger(Axis::LeftTrigger).set(&mut p, Some(Key::D.into()));
+        assert_eq!(
+            Slot::Trigger(Axis::LeftTrigger).get(&p),
+            Some(&Key::D.into())
+        );
+        Slot::Trigger(Axis::LeftTrigger).set(&mut p, None);
         assert!(p.axes.is_empty());
     }
 

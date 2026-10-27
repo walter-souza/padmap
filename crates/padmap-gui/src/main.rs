@@ -5,6 +5,7 @@ mod app;
 mod capture;
 mod diagram;
 mod slots;
+mod stick_editor;
 mod theme;
 mod worker;
 

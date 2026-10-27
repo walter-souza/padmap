@@ -1,6 +1,7 @@
 use crate::capture::Capture;
-use crate::diagram::{self, Click, Live, Stick};
+use crate::diagram::{self, Click, Live};
 use crate::slots::Slot;
+use crate::stick_editor::{Outcome, StickEditor};
 use crate::theme::{self, Palette, ACCENT, ACCENT_STRONG, BAD, GOOD};
 use crate::worker::{Command, Status, Worker};
 use eframe::egui::{self, vec2, Color32, Margin, RichText, Sense, Stroke, StrokeKind, Theme};
@@ -18,8 +19,8 @@ pub struct PadmapApp {
     path: Option<PathBuf>,
     dirty: bool,
     capture: Option<(Slot, Capture)>,
-    /// Editor de direções aberto. Fica escondido enquanto uma captura acontece.
-    stick_editor: Option<Stick>,
+    /// Editor de setores do stick, quando aberto.
+    stick_editor: Option<StickEditor>,
     active: bool,
     dry_run: bool,
     pads: BTreeMap<u32, String>,
@@ -374,75 +375,17 @@ impl PadmapApp {
     // ---------------------------------------------------------------- janelas
 
     fn stick_modal(&mut self, ui: &mut egui::Ui, pal: &Palette) {
-        let Some(stick) = self.stick_editor else {
+        let Some(editor) = &mut self.stick_editor else {
             return;
         };
-        if self.capture.is_some() {
-            return;
-        }
-        let mut close = false;
-        let mut action = None;
-        let modal = egui::Modal::new(egui::Id::unique("padmap-stick")).show(ui.ctx(), |ui| {
-            ui.set_width(360.0);
-            ui.heading(stick.title());
-            ui.label(
-                RichText::new("Tecla de cada direção e do clique do stick.").color(pal.text_muted),
-            );
-            ui.add_space(10.0);
-            egui::Grid::new("stick-grid")
-                .num_columns(3)
-                .spacing([12.0, 8.0])
-                .show(ui, |ui| {
-                    for (label, slot) in stick.slots() {
-                        ui.label(label);
-                        let text = slot
-                            .get(&self.profile)
-                            .map_or("LIVRE".to_owned(), |c| c.to_string().to_uppercase());
-                        let mapped = slot.get(&self.profile).is_some();
-                        egui::Frame::new()
-                            .fill(if mapped { ACCENT } else { pal.chip_bg })
-                            .stroke(Stroke::new(
-                                1.0,
-                                if mapped { ACCENT } else { pal.chip_border },
-                            ))
-                            .corner_radius(5)
-                            .inner_margin(Margin::symmetric(8, 3))
-                            .show(ui, |ui| {
-                                ui.set_min_width(60.0);
-                                ui.label(RichText::new(text).size(11.0).strong().color(
-                                    if mapped {
-                                        Color32::WHITE
-                                    } else {
-                                        pal.chip_text
-                                    },
-                                ));
-                            });
-                        ui.horizontal(|ui| {
-                            if ui.button("Capturar").clicked() {
-                                action = Some(Click::Map(slot));
-                            }
-                            if ui
-                                .add_enabled(mapped, egui::Button::new("Limpar"))
-                                .clicked()
-                            {
-                                action = Some(Click::Clear(slot));
-                            }
-                        });
-                        ui.end_row();
-                    }
-                });
-            ui.add_space(10.0);
-            if ui.button("Fechar").clicked() {
-                close = true;
+        match editor.show(ui.ctx(), pal, &self.live) {
+            Some(Outcome::Save(binding)) => {
+                self.profile.sticks.insert(editor.stick, binding);
+                self.stick_editor = None;
+                self.profile_changed();
             }
-        });
-        if close || modal.should_close() {
-            self.stick_editor = None;
-        }
-        match action {
-            Some(Click::Map(slot)) => self.capture = Some((slot, Capture::default())),
-            Some(Click::Clear(slot)) => self.set_slot(slot, None),
-            _ => {}
+            Some(Outcome::Cancel) => self.stick_editor = None,
+            None => {}
         }
     }
 
@@ -497,7 +440,7 @@ fn bar_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
 }
 
 /// Interruptor de liga/desliga desenhado à mão.
-fn switch(ui: &mut egui::Ui, pal: &Palette, on: bool) -> egui::Response {
+pub(crate) fn switch(ui: &mut egui::Ui, pal: &Palette, on: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(36.0, 20.0), Sense::click());
     let t = ui.ctx().animate_bool(resp.id, on);
     let track = if on { ACCENT } else { pal.switch_off };
@@ -613,7 +556,9 @@ impl eframe::App for PadmapApp {
                             self.set_slot(slot, None);
                         }
                     }
-                    Some(Click::EditStick(stick)) => self.stick_editor = Some(stick),
+                    Some(Click::EditStick(stick)) => {
+                        self.stick_editor = Some(StickEditor::new(stick, &self.profile))
+                    }
                     None => {}
                 }
             });

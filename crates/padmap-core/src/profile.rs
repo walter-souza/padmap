@@ -2,6 +2,7 @@
 
 use crate::gamepad::{Axis, Button};
 use crate::key::KeyCombo;
+use crate::stick::{Sector, Stick, StickBinding};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -39,6 +40,7 @@ impl Default for Settings {
 }
 
 /// Teclas para cada sentido de um eixo. Para gatilhos só `positive` faz sentido.
+/// Eixos de stick escritos aqui viram setores em `sticks` ao carregar o perfil.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AxisBinding {
@@ -58,11 +60,14 @@ pub struct Profile {
     pub buttons: BTreeMap<Button, KeyCombo>,
     #[serde(default)]
     pub axes: BTreeMap<Axis, AxisBinding>,
+    #[serde(default)]
+    pub sticks: BTreeMap<Stick, StickBinding>,
 }
 
 impl Profile {
     pub fn from_toml(text: &str) -> Result<Self, ProfileError> {
-        let profile: Profile = toml::from_str(text)?;
+        let mut profile: Profile = toml::from_str(text)?;
+        profile.migrate_stick_axes()?;
         profile.validate()?;
         Ok(profile)
     }
@@ -78,6 +83,45 @@ impl Profile {
 
     pub fn to_toml(&self) -> String {
         toml::to_string_pretty(self).expect("perfil sempre serializável")
+    }
+
+    /// Zona morta do stick: a dele, ou `settings.axis_threshold`.
+    pub fn deadzone(&self, stick: Stick) -> f32 {
+        self.sticks
+            .get(&stick)
+            .and_then(|b| b.deadzone)
+            .unwrap_or(self.settings.axis_threshold)
+    }
+
+    /// Perfis antigos mapeavam cada sentido de `left_x`/`left_y` como eixo
+    /// solto. Eles viram quatro setores de 90° com disparo compartilhado, que
+    /// também acionam as duas teclas na diagonal.
+    fn migrate_stick_axes(&mut self) -> Result<(), ProfileError> {
+        for stick in Stick::ALL {
+            let (x, y) = stick.default_axes();
+            if !self.axes.contains_key(&x) && !self.axes.contains_key(&y) {
+                continue;
+            }
+            if self.sticks.contains_key(&stick) {
+                return Err(ProfileError::Invalid(format!(
+                    "sticks.{stick} e axes.{x}/axes.{y} mapeiam o mesmo stick; use só sticks.{stick}"
+                )));
+            }
+            let xb = self.axes.remove(&x).unwrap_or_default();
+            let yb = self.axes.remove(&y).unwrap_or_default();
+            let mut binding = StickBinding::new(
+                vec![
+                    Sector::new(45.0, yb.negative),
+                    Sector::new(135.0, xb.negative),
+                    Sector::new(225.0, yb.positive),
+                    Sector::new(315.0, xb.positive),
+                ],
+                true,
+            );
+            binding.deadzone = xb.threshold.or(yb.threshold);
+            self.sticks.insert(stick, binding);
+        }
+        Ok(())
     }
 
     fn validate(&self) -> Result<(), ProfileError> {
@@ -99,6 +143,15 @@ impl Profile {
                 )));
             }
         }
+        for (stick, binding) in &self.sticks {
+            binding.validate(*stick).map_err(ProfileError::Invalid)?;
+            let (x, y) = binding.axes(*stick);
+            if self.axes.contains_key(&x) || self.axes.contains_key(&y) {
+                return Err(ProfileError::Invalid(format!(
+                    "sticks.{stick} usa {x}/{y}, que também estão em axes"
+                )));
+            }
+        }
         Ok(())
     }
 }
@@ -112,7 +165,49 @@ mod tests {
     fn parses_example_profile() {
         let p = Profile::from_toml(include_str!("../../../profiles/default.toml")).unwrap();
         assert_eq!(p.buttons[&Button::South], Key::Space.into());
-        assert!(p.axes[&Axis::LeftX].negative.is_some());
+        assert_eq!(p.sticks[&Stick::Left].sectors[0].key, Some(Key::W.into()));
+    }
+
+    #[test]
+    fn migrates_old_stick_axes_to_sectors() {
+        let p = Profile::from_toml(
+            "name='t'
+[axes.left_x]
+negative='A'
+positive='D'
+threshold=0.3
+[axes.left_y]
+negative='W'
+",
+        )
+        .unwrap();
+        assert!(p.axes.is_empty());
+        let b = &p.sticks[&Stick::Left];
+        let keys: Vec<_> = b.sectors.iter().map(|s| s.key.clone()).collect();
+        assert_eq!(
+            keys,
+            [
+                Some(Key::W.into()),
+                Some(Key::A.into()),
+                None,
+                Some(Key::D.into())
+            ]
+        );
+        assert!(b.shared);
+        assert_eq!(p.deadzone(Stick::Left), 0.3);
+    }
+
+    #[test]
+    fn rejects_stick_in_both_formats() {
+        let err = Profile::from_toml(
+            "name='t'
+[axes.left_x]
+negative='A'
+[sticks.left]
+sectors=[{start=0.0}]
+",
+        );
+        assert!(matches!(err, Err(ProfileError::Invalid(_))));
     }
 
     #[test]

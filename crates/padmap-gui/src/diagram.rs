@@ -4,15 +4,15 @@
 //! Tudo é desenhado num espaço de 1000 × 640 unidades e escalado para caber na
 //! janela. Clicar numa etiqueta ou numa parte do controle devolve um `Click`.
 
-use crate::slots::Slot;
+use crate::slots::{stick_click, stick_short, stick_title, Slot};
 use crate::theme::{Palette, ACCENT, ACCENT_STRONG, ACTIVE};
 use eframe::egui::{
     self, vec2, Align2, Color32, FontId, Galley, Pos2, Rect, Response, Sense, Shape, Stroke,
     StrokeKind, Ui,
 };
-use padmap_core::{Axis, Button, Profile};
+use padmap_core::{Axis, Button, Profile, Stick};
 use std::collections::{HashMap, HashSet};
-use std::f32::consts::{FRAC_PI_4, FRAC_PI_8, TAU};
+use std::f32::consts::TAU;
 use std::sync::Arc;
 
 #[derive(Default)]
@@ -29,13 +29,25 @@ impl Live {
     pub fn is_active(&self, slot: Slot, profile: &Profile) -> bool {
         match slot {
             Slot::Button(b) => self.pressed.contains(&b),
-            Slot::AxisNeg(a) => -self.axis(a) >= threshold(profile, a),
-            Slot::AxisPos(a) => self.axis(a) >= threshold(profile, a),
+            Slot::Trigger(a) => self.axis(a) >= threshold(profile, a),
         }
+    }
+
+    /// Setores com tecla que o stick está acionando agora.
+    pub fn stick_sectors(&self, profile: &Profile, stick: Stick) -> Vec<usize> {
+        let Some(binding) = profile.sticks.get(&stick) else {
+            return Vec::new();
+        };
+        let (ax, ay) = binding.axes(stick);
+        binding
+            .sectors_at(self.axis(ax), self.axis(ay), profile.deadzone(stick))
+            .into_iter()
+            .filter(|&i| binding.sectors[i].key.is_some())
+            .collect()
     }
 }
 
-/// Ponto em que o eixo aciona a tecla, como o `Mapper` calcula.
+/// Ponto em que o gatilho aciona a tecla, como o `Mapper` calcula.
 pub fn threshold(profile: &Profile, axis: Axis) -> f32 {
     profile
         .axes
@@ -44,48 +56,32 @@ pub fn threshold(profile: &Profile, axis: Axis) -> f32 {
         .unwrap_or(profile.settings.axis_threshold)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Stick {
-    Left,
-    Right,
+/// Eixos que o stick usa no perfil.
+pub fn stick_axes(profile: &Profile, stick: Stick) -> (Axis, Axis) {
+    profile
+        .sticks
+        .get(&stick)
+        .map_or(stick.default_axes(), |b| b.axes(stick))
 }
 
-impl Stick {
-    pub fn axes(self) -> (Axis, Axis) {
-        match self {
-            Stick::Left => (Axis::LeftX, Axis::LeftY),
-            Stick::Right => (Axis::RightX, Axis::RightY),
-        }
-    }
+/// Ponto a `r` do centro `c` no ângulo `deg` (anti-horário a partir da direita).
+pub fn polar(c: Pos2, r: f32, deg: f32) -> Pos2 {
+    let a = deg.to_radians();
+    c + vec2(a.cos(), -a.sin()) * r
+}
 
-    pub fn short(self) -> &'static str {
-        match self {
-            Stick::Left => "LS",
-            Stick::Right => "RS",
+/// Fatia de pizza de `start` até `start + width` graus.
+pub fn wedge(painter: &egui::Painter, c: Pos2, r: f32, start: f32, width: f32, fill: Color32) {
+    // Em pedaços de até 45° para cada polígono continuar convexo.
+    let pieces = (width / 45.0).ceil().max(1.0) as usize;
+    let step = width / pieces as f32;
+    for p in 0..pieces {
+        let a0 = start + step * p as f32;
+        let mut points = vec![c];
+        for k in 0..=8 {
+            points.push(polar(c, r, a0 + step * k as f32 / 8.0));
         }
-    }
-
-    pub fn title(self) -> &'static str {
-        match self {
-            Stick::Left => "Stick esquerdo",
-            Stick::Right => "Stick direito",
-        }
-    }
-
-    /// As quatro direções e o clique, na ordem em que aparecem no editor.
-    pub fn slots(self) -> [(&'static str, Slot); 5] {
-        let (x, y) = self.axes();
-        let click = match self {
-            Stick::Left => Button::LeftStick,
-            Stick::Right => Button::RightStick,
-        };
-        [
-            ("↑  Cima", Slot::AxisNeg(y)),
-            ("↓  Baixo", Slot::AxisPos(y)),
-            ("←  Esquerda", Slot::AxisNeg(x)),
-            ("→  Direita", Slot::AxisPos(x)),
-            ("Clique", Slot::Button(click)),
-        ]
+        painter.add(Shape::convex_polygon(points, fill, Stroke::NONE));
     }
 }
 
@@ -141,7 +137,7 @@ const fn right(slot: Slot, label: &'static str, y: f32, line: &'static [(f32, f3
 
 const CALLOUTS: &[Callout] = &[
     left(
-        Slot::AxisPos(Axis::LeftTrigger),
+        Slot::Trigger(Axis::LeftTrigger),
         "L2",
         56.0,
         &[(240.0, 56.0), (310.0, 56.0)],
@@ -213,7 +209,7 @@ const CALLOUTS: &[Callout] = &[
         line: &[(596.0, 26.0), (536.0, 164.0)],
     },
     right(
-        Slot::AxisPos(Axis::RightTrigger),
+        Slot::Trigger(Axis::RightTrigger),
         "R2",
         56.0,
         &[(760.0, 56.0), (690.0, 56.0)],
@@ -326,8 +322,8 @@ impl Stage<'_> {
     fn controller_back(&mut self) {
         let pal = self.pal;
         for (slot, x0, label) in [
-            (Slot::AxisPos(Axis::LeftTrigger), 310.0, "L2"),
-            (Slot::AxisPos(Axis::RightTrigger), 604.0, "R2"),
+            (Slot::Trigger(Axis::LeftTrigger), 310.0, "L2"),
+            (Slot::Trigger(Axis::RightTrigger), 604.0, "R2"),
         ] {
             let rect = self.rect(x0, 42.0, x0 + 86.0, 70.0);
             let r = 13.0 * self.s;
@@ -338,7 +334,7 @@ impl Stage<'_> {
                 self.stroke(1.0, pal.trigger_stroke),
                 StrokeKind::Inside,
             );
-            let Slot::AxisPos(axis) = slot else {
+            let Slot::Trigger(axis) = slot else {
                 unreachable!()
             };
             let v = self.live.axis(axis).clamp(0.0, 1.0);
@@ -486,18 +482,13 @@ impl Stage<'_> {
     }
 
     fn stick_engaged(&self, stick: Stick) -> bool {
-        stick.slots()[..4]
-            .iter()
-            .any(|(_, slot)| self.live.is_active(*slot, self.profile))
+        !self.live.stick_sectors(self.profile, stick).is_empty()
     }
 
     fn stick(&mut self, stick: Stick, x: f32, y: f32) {
         let pal = self.pal;
-        let (ax, ay) = stick.axes();
-        let click = match stick {
-            Stick::Left => Button::LeftStick,
-            Stick::Right => Button::RightStick,
-        };
+        let (ax, ay) = stick_axes(self.profile, stick);
+        let click = stick_click(stick);
         let c = self.at(x, y);
         let ring = if self.stick_engaged(stick) {
             ACTIVE
@@ -528,7 +519,10 @@ impl Stage<'_> {
             .circle_filled(cap, 4.0 * self.s, Color32::from_rgb(0x0A, 0x0C, 0x14));
         let resp = self
             .interact(Rect::from_center_size(c, vec2(68.0, 68.0) * self.s), stick)
-            .on_hover_text(format!("{}: clique para editar as direções", stick.title()));
+            .on_hover_text(format!(
+                "{}: clique para editar os setores",
+                stick_title(stick)
+            ));
         self.hover_ring(&resp, c, 34.0);
         if resp.clicked() {
             self.clicked = Some(Click::EditStick(stick));
@@ -762,20 +756,19 @@ impl Stage<'_> {
     fn stick_panel(&mut self, stick: Stick, cx: f32) {
         let pal = self.pal;
         let s = self.s;
-        let (ax, ay) = stick.axes();
-        let slots = stick.slots();
-        let active: Vec<String> = slots[..4]
+        let (ax, ay) = stick_axes(self.profile, stick);
+        let binding = self.profile.sticks.get(&stick);
+        let sectors = self.live.stick_sectors(self.profile, stick);
+        let active: Vec<String> = sectors
             .iter()
-            .filter(|(_, slot)| self.live.is_active(*slot, self.profile))
-            .filter_map(|(_, slot)| slot.get(self.profile).map(|c| c.to_string().to_uppercase()))
+            .filter_map(|&i| binding?.sectors[i].key.as_ref())
+            .map(|c| c.to_string().to_uppercase())
             .collect();
-        let engaged = self.stick_engaged(stick);
-        let any_mapped = slots[..4]
-            .iter()
-            .any(|(_, slot)| slot.get(self.profile).is_some());
+        let engaged = !active.is_empty();
+        let any_mapped = binding.is_some_and(|b| b.sectors.iter().any(|s| s.key.is_some()));
 
         // Selo de cima: tecla acionada agora, ou INATIVO / LIVRE.
-        let (badge, bg, border, color) = if engaged && !active.is_empty() {
+        let (badge, bg, border, color) = if engaged {
             (active.join(" + "), pal.active_bg, ACTIVE, pal.text)
         } else if any_mapped {
             (
@@ -805,7 +798,7 @@ impl Stage<'_> {
         self.painter
             .galley(rect.center() - g.size() / 2.0, g, color);
 
-        // Círculo com oito setores. 44 → 61.6 px: mesma escala do protótipo (100 → 140).
+        // Círculo com os setores do perfil. 44 → 61.6 px: mesma escala do protótipo (100 → 140).
         let c = self.at(cx, 500.0);
         let reach = 61.6 * s;
         let ring = if engaged { ACTIVE } else { pal.stick_ring };
@@ -813,28 +806,28 @@ impl Stage<'_> {
             .circle(c, 64.4 * s, pal.stick_bg, self.stroke(3.5, ring));
 
         let (x, y) = (self.live.axis(ax), self.live.axis(ay));
-        if engaged {
-            let center = sector_angle(x, y);
-            let mut points = vec![c];
-            let steps = 12;
-            for i in 0..=steps {
-                let a = center - FRAC_PI_8 + FRAC_PI_4 * i as f32 / steps as f32;
-                points.push(c + vec2(a.cos(), -a.sin()) * reach);
+        if let Some(b) = binding {
+            for &i in &sectors {
+                wedge(
+                    &self.painter,
+                    c,
+                    reach,
+                    b.sectors[i].start,
+                    b.width(i),
+                    Color32::from_rgba_unmultiplied(0xEA, 0xB3, 0x08, 115),
+                );
             }
-            self.painter.add(Shape::convex_polygon(
-                points,
-                Color32::from_rgba_unmultiplied(0xEA, 0xB3, 0x08, 115),
-                Stroke::NONE,
-            ));
-        }
-        for k in 0..4 {
-            let a = FRAC_PI_8 + FRAC_PI_4 * k as f32;
-            let d = vec2(a.cos(), -a.sin()) * reach;
-            self.painter
-                .line_segment([c - d, c + d], self.stroke(1.4, pal.stick_spoke));
+            if b.sectors.len() > 1 {
+                for sector in &b.sectors {
+                    self.painter.line_segment(
+                        [c, polar(c, reach, sector.start)],
+                        self.stroke(1.4, pal.stick_spoke),
+                    );
+                }
+            }
         }
         // Anel tracejado no ponto de acionamento.
-        let t = threshold(self.profile, ay) * reach;
+        let t = self.profile.deadzone(stick) * reach;
         let n = 48;
         for i in (0..n).step_by(2) {
             let a0 = TAU * i as f32 / n as f32;
@@ -864,7 +857,10 @@ impl Stage<'_> {
                 Rect::from_center_size(c, vec2(130.0, 130.0) * s),
                 ("panel", stick),
             )
-            .on_hover_text(format!("{}: clique para editar as direções", stick.title()));
+            .on_hover_text(format!(
+                "{}: clique para editar os setores",
+                stick_title(stick)
+            ));
         if resp.hovered() {
             self.painter
                 .circle_stroke(c, 68.0 * s, self.stroke(1.5, ACCENT));
@@ -875,7 +871,7 @@ impl Stage<'_> {
 
         // Botão LS / RS e a legenda.
         let g = self.text(
-            stick.short(),
+            stick_short(stick),
             11.0,
             if engaged { pal.text } else { Color32::WHITE },
         );
@@ -912,12 +908,6 @@ impl Stage<'_> {
             pal.text_muted,
         );
     }
-}
-
-/// Ângulo central (anti-horário a partir da direita) do setor de 45° em que o
-/// stick está. O eixo Y do controle cresce para baixo.
-fn sector_angle(x: f32, y: f32) -> f32 {
-    ((-y).atan2(x) / FRAC_PI_4).round() * FRAC_PI_4
 }
 
 /// Desenha a tela e retorna o que foi clicado, se algo foi.
@@ -972,15 +962,6 @@ mod tests {
     }
 
     #[test]
-    fn sector_follows_stick_direction() {
-        let close = |a: f32, b: f32| (a - b).abs() < 1e-5;
-        assert!(close(sector_angle(0.0, -1.0), FRAC_PI_4 * 2.0)); // cima
-        assert!(close(sector_angle(1.0, 0.1), 0.0)); // direita, um pouco abaixo
-        assert!(close(sector_angle(0.7, -0.7), FRAC_PI_4)); // diagonal cima-direita
-        assert!(close(sector_angle(-0.2, 1.0).abs(), FRAC_PI_4 * 2.0)); // baixo
-    }
-
-    #[test]
     fn per_axis_threshold_wins() {
         let p = Profile::from_toml(
             "name='t'\n[settings]\naxis_threshold=0.5\n[axes.left_trigger]\npositive='LAlt'\nthreshold=0.3\n",
@@ -990,6 +971,6 @@ mod tests {
         assert_eq!(threshold(&p, Axis::LeftX), 0.5);
         let mut live = Live::default();
         live.axes.insert(Axis::LeftTrigger, 0.35);
-        assert!(live.is_active(Slot::AxisPos(Axis::LeftTrigger), &p));
+        assert!(live.is_active(Slot::Trigger(Axis::LeftTrigger), &p));
     }
 }

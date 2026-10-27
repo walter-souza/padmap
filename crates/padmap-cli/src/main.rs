@@ -108,6 +108,25 @@ fn check(path: &PathBuf) -> Result<()> {
             fmt(&b.positive)
         );
     }
+    for (stick, b) in &profile.sticks {
+        let (x, y) = b.axes(*stick);
+        println!(
+            "  stick {stick} ({x}/{y}, zona morta {}{})",
+            profile.deadzone(*stick),
+            if b.shared { ", compartilhado" } else { "" }
+        );
+        for (i, sector) in b.sectors.iter().enumerate() {
+            let key = sector
+                .key
+                .as_ref()
+                .map_or("-".to_string(), |c| c.to_string());
+            println!(
+                "    {:>5.1}°..{:>5.1}°  -> {key}",
+                sector.start,
+                (sector.start + b.width(i)) % 360.0
+            );
+        }
+    }
     Ok(())
 }
 

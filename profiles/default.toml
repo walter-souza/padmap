@@ -22,21 +22,26 @@ dpad_right = "2"
 dpad_down = "3"
 dpad_left = "4"
 
-[axes.left_x]
-negative = "A"
-positive = "D"
+# Sticks por ângulo: em graus, anti-horário a partir da direita (90 = cima).
+# Cada setor vai do seu `start` até o `start` do próximo. `shared` faz setores
+# vizinhos se sobreporem, então a diagonal aciona as duas teclas.
+[sticks.left]
+shared = true
+sectors = [
+    { start = 45.0, key = "W" },
+    { start = 135.0, key = "A" },
+    { start = 225.0, key = "S" },
+    { start = 315.0, key = "D" },
+]
 
-[axes.left_y]
-negative = "W"
-positive = "S"
-
-[axes.right_x]
-negative = "Left"
-positive = "Right"
-
-[axes.right_y]
-negative = "Up"
-positive = "Down"
+[sticks.right]
+shared = true
+sectors = [
+    { start = 45.0, key = "Up" },
+    { start = 135.0, key = "Left" },
+    { start = 225.0, key = "Down" },
+    { start = 315.0, key = "Right" },
+]
 
 [axes.left_trigger]
 positive = "LAlt"
