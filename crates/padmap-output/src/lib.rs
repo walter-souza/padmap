@@ -1,6 +1,6 @@
-//! Saída de teclado. Cada sistema operacional tem seu backend, escolhido em
-//! tempo de compilação por `platform_sink()`; o resto do app só conhece o
-//! trait `KeyboardSink`.
+//! Saída de teclado e mouse. Cada sistema operacional tem seu backend,
+//! escolhido em tempo de compilação por `platform_sink()`; o resto do app só
+//! conhece o trait `OutputSink`.
 
 mod codes;
 
@@ -23,8 +23,13 @@ pub enum OutputError {
     Unsupported,
 }
 
-pub trait KeyboardSink {
+pub trait OutputSink {
     fn send(&mut self, action: KeyAction) -> Result<(), OutputError>;
+
+    /// Move o cursor `(dx, dy)` pixels a partir de onde ele está, com y para
+    /// baixo. Movimento relativo, como um mouse de verdade, para funcionar
+    /// também em jogos que prendem o cursor.
+    fn move_mouse(&mut self, dx: i32, dy: i32) -> Result<(), OutputError>;
 
     fn send_all(&mut self, actions: &[KeyAction]) -> Result<(), OutputError> {
         actions.iter().try_for_each(|&a| self.send(a))
@@ -32,7 +37,7 @@ pub trait KeyboardSink {
 }
 
 /// Backend nativo do sistema atual.
-pub fn platform_sink() -> Result<Box<dyn KeyboardSink>, OutputError> {
+pub fn platform_sink() -> Result<Box<dyn OutputSink>, OutputError> {
     #[cfg(windows)]
     return Ok(Box::new(windows::SendInputSink::new()));
     #[cfg(target_os = "linux")]
@@ -47,12 +52,18 @@ pub fn platform_sink() -> Result<Box<dyn KeyboardSink>, OutputError> {
 #[derive(Default)]
 pub struct DryRunSink;
 
-impl KeyboardSink for DryRunSink {
+impl OutputSink for DryRunSink {
     fn send(&mut self, action: KeyAction) -> Result<(), OutputError> {
         match action {
             KeyAction::Press(k) => log::info!("[simulação] pressiona {k}"),
             KeyAction::Release(k) => log::info!("[simulação] solta {k}"),
         }
+        Ok(())
+    }
+
+    /// Não registra nada: o mouse anda a cada poucos milissegundos e
+    /// inundaria o log.
+    fn move_mouse(&mut self, _dx: i32, _dy: i32) -> Result<(), OutputError> {
         Ok(())
     }
 }

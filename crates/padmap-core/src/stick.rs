@@ -1,5 +1,5 @@
 //! Sticks mapeados por ângulo: o círculo do stick é dividido em setores e cada
-//! setor pode acionar uma tecla.
+//! setor pode acionar uma tecla. No modo mouse, o stick move o cursor.
 //!
 //! Ângulos em graus, no sentido anti-horário a partir da direita (0° = direita,
 //! 90° = cima), como o stick é visto. O eixo Y do controle cresce para baixo, por
@@ -48,6 +48,64 @@ impl fmt::Display for Stick {
     }
 }
 
+/// O que o stick faz: aciona teclas pelos setores ou move o mouse.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StickMode {
+    #[default]
+    Sectors,
+    Mouse,
+}
+
+impl StickMode {
+    fn is_sectors(&self) -> bool {
+        *self == StickMode::Sectors
+    }
+}
+
+/// Como o stick move o mouse no modo `Mouse`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct MouseSettings {
+    /// Velocidade do cursor, em pixels por segundo, com o stick no fim do curso.
+    pub speed: f32,
+    /// Expoente da curva de resposta: 1 é linear; maior deixa o começo do curso
+    /// mais lento, para mirar, sem perder a velocidade no fim.
+    pub curve: f32,
+    /// Para cima no stick move o cursor para baixo.
+    pub invert_y: bool,
+}
+
+impl Default for MouseSettings {
+    fn default() -> Self {
+        MouseSettings {
+            speed: 1200.0,
+            curve: 2.0,
+            invert_y: false,
+        }
+    }
+}
+
+impl MouseSettings {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Velocidade do cursor em pixels por segundo, `(x, y)` com y para baixo
+    /// como na tela, para o stick em `(x, y)`. Dentro da zona morta é zero; dela
+    /// até o fim do curso a força vai de 0 a 1 e passa pela curva.
+    pub fn velocity(&self, x: f32, y: f32, deadzone: f32) -> (f32, f32) {
+        let r = x.hypot(y);
+        if r <= deadzone || deadzone >= 1.0 {
+            return (0.0, 0.0);
+        }
+        let t = ((r.min(1.0) - deadzone) / (1.0 - deadzone)).clamp(0.0, 1.0);
+        let scale = self.speed * t.powf(self.curve) / r;
+        let y = if self.invert_y { -y } else { y };
+        (x * scale, y * scale)
+    }
+}
+
 /// Um setor começa em `start` e vai até o início do próximo.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -73,13 +131,20 @@ pub struct StickBinding {
     pub x_axis: Option<Axis>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub y_axis: Option<Axis>,
-    /// Zona morta: fração do curso a partir da qual os setores acionam.
-    /// Sem valor, vale `settings.axis_threshold`.
+    /// Setores ou mouse. Os setores ficam guardados no modo mouse, para quem
+    /// voltar às teclas não perder o mapeamento.
+    #[serde(default, skip_serializing_if = "StickMode::is_sectors")]
+    pub mode: StickMode,
+    #[serde(default, skip_serializing_if = "MouseSettings::is_default")]
+    pub mouse: MouseSettings,
+    /// Zona morta: fração do curso a partir da qual os setores acionam (ou o
+    /// mouse começa a andar). Sem valor, vale `settings.axis_threshold`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deadzone: Option<f32>,
     /// Disparo compartilhado: setores vizinhos se sobrepõem perto da divisa.
     #[serde(default)]
     pub shared: bool,
+    #[serde(default)]
     pub sectors: Vec<Sector>,
 }
 
@@ -93,6 +158,8 @@ impl StickBinding {
         StickBinding {
             x_axis: None,
             y_axis: None,
+            mode: StickMode::Sectors,
+            mouse: MouseSettings::default(),
             deadzone: None,
             shared,
             sectors,
@@ -224,7 +291,14 @@ impl StickBinding {
         if self.deadzone.is_some_and(|d| !(d > 0.0 && d <= 1.0)) {
             return Err(format!("sticks.{stick}.deadzone deve estar em (0, 1]"));
         }
-        if self.sectors.is_empty() {
+        let m = &self.mouse;
+        if !(m.speed > 0.0 && m.speed.is_finite()) || !(m.curve > 0.0 && m.curve.is_finite()) {
+            return Err(format!(
+                "sticks.{stick}.mouse: speed e curve devem ser números positivos"
+            ));
+        }
+        // No modo mouse os setores são opcionais: só ficam guardados.
+        if self.sectors.is_empty() && self.mode == StickMode::Sectors {
             return Err(format!("sticks.{stick}: precisa de pelo menos um setor"));
         }
         if self
@@ -318,6 +392,36 @@ mod tests {
         assert!(b.validate(Stick::Left).is_ok());
         b.remove(i);
         assert_eq!(b, four(false));
+    }
+
+    #[test]
+    fn mouse_velocity_follows_curve_and_deadzone() {
+        let m = MouseSettings::default();
+        assert_eq!(m.velocity(0.1, 0.0, 0.2), (0.0, 0.0));
+        assert_eq!(m.velocity(1.0, 0.0, 0.2), (1200.0, 0.0));
+        // No meio do curso útil, com curva 2: um quarto da velocidade.
+        let (vx, _) = m.velocity(0.6, 0.0, 0.2);
+        assert!((vx - 300.0).abs() < 0.01);
+        // Para cima no stick (y negativo) sobe o cursor; invertido, desce.
+        assert!(m.velocity(0.0, -1.0, 0.2).1 < 0.0);
+        let inv = MouseSettings {
+            invert_y: true,
+            ..m
+        };
+        assert!(inv.velocity(0.0, -1.0, 0.2).1 > 0.0);
+        // Além do círculo (cantos do quadrado do stick) não passa do máximo.
+        let (vx, vy) = m.velocity(1.0, 1.0, 0.2);
+        assert!((vx.hypot(vy) - 1200.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn mouse_mode_allows_no_sectors() {
+        let mut b = StickBinding::new(Vec::new(), false);
+        assert!(b.validate(Stick::Right).is_err());
+        b.mode = StickMode::Mouse;
+        assert!(b.validate(Stick::Right).is_ok());
+        b.mouse.speed = 0.0;
+        assert!(b.validate(Stick::Right).is_err());
     }
 
     #[test]

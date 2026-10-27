@@ -1,6 +1,7 @@
-//! Editor de stick por ângulo: o círculo do stick dividido em setores, cada um
-//! com sua tecla. Arrastar as alças move as divisas, clicar num setor captura a
-//! tecla e o botão direito deixa o setor livre.
+//! Editor de stick. No modo teclas, o círculo do stick é dividido em setores,
+//! cada um com sua tecla: arrastar as alças move as divisas, clicar num setor
+//! captura a tecla e o botão direito deixa o setor livre. No modo mouse, o stick
+//! move o cursor, com velocidade, curva e uma área para testar.
 //!
 //! Tudo é editado numa cópia; o perfil só muda em "Salvar Mapeamento".
 
@@ -14,7 +15,8 @@ use eframe::egui::{
     Rect, Response, RichText, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder,
 };
 use padmap_core::stick::angle_of;
-use padmap_core::{Axis, Key, Profile, Sector, Stick, StickBinding};
+use padmap_core::{Axis, Key, MouseSettings, Profile, Sector, Stick, StickBinding, StickMode};
+use std::collections::VecDeque;
 
 const LEFT_W: f32 = 400.0;
 const RIGHT_W: f32 = 300.0;
@@ -72,6 +74,43 @@ impl Preset {
     }
 }
 
+struct MousePreset {
+    label: &'static str,
+    speed: f32,
+    curve: f32,
+}
+
+const MOUSE_PRESETS: &[MousePreset] = &[
+    MousePreset {
+        label: "Mouse padrão",
+        speed: 1200.0,
+        curve: 2.0,
+    },
+    MousePreset {
+        label: "Mouse preciso",
+        speed: 700.0,
+        curve: 2.6,
+    },
+    MousePreset {
+        label: "Mouse rápido",
+        speed: 2000.0,
+        curve: 1.6,
+    },
+];
+
+/// Zona morta sugerida ao passar um stick para o modo mouse.
+const MOUSE_DEADZONE: f32 = 0.15;
+
+/// Pontos guardados do rastro do cursor na área de teste.
+const TRAIL: usize = 48;
+
+/// Cursor de mentira da área de teste, em coordenadas relativas ao centro.
+#[derive(Default)]
+struct TestCursor {
+    pos: egui::Vec2,
+    trail: VecDeque<egui::Vec2>,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Field {
     X,
@@ -93,6 +132,7 @@ pub struct StickEditor {
     capture: Option<(usize, Capture)>,
     picking: Option<Field>,
     dragging: Option<usize>,
+    test: TestCursor,
 }
 
 impl StickEditor {
@@ -105,6 +145,15 @@ impl StickEditor {
                 .collect();
             StickBinding::new(free, false)
         });
+        // Um stick em modo mouse pode vir do perfil sem setores; ao voltar para
+        // teclas, começa com os de 4 direções livres.
+        if draft.sectors.is_empty() {
+            draft.sectors = PRESETS[0]
+                .sectors()
+                .into_iter()
+                .map(|s| Sector::new(s.start, None))
+                .collect();
+        }
         let (x, y) = draft.axes(stick);
         draft.x_axis = Some(x);
         draft.y_axis = Some(y);
@@ -117,12 +166,32 @@ impl StickEditor {
             capture: None,
             picking: None,
             dragging: None,
+            test: TestCursor::default(),
         }
     }
 
     /// Esperando uma tecla para algum setor.
     pub fn capturing(&self) -> bool {
         self.capture.is_some()
+    }
+
+    /// Troca o modo. A zona morta que ainda está no padrão de um modo passa para
+    /// o padrão do outro: metade do curso serve para teclas, mas é demais para
+    /// mirar com o mouse.
+    fn set_mode(&mut self, mode: StickMode) {
+        let dz = self.deadzone();
+        match mode {
+            StickMode::Mouse if dz == self.default_deadzone => {
+                self.draft.deadzone = Some(MOUSE_DEADZONE)
+            }
+            StickMode::Sectors if dz == MOUSE_DEADZONE => {
+                self.draft.deadzone = Some(self.default_deadzone)
+            }
+            _ => {}
+        }
+        self.draft.mode = mode;
+        self.capture = None;
+        self.selected = None;
     }
 
     fn axes(&self) -> (Axis, Axis) {
@@ -172,17 +241,27 @@ impl StickEditor {
                 egui::Frame::new()
                     .inner_margin(Margin::symmetric(PAD, 16))
                     .show(ui, |ui| {
+                        let mouse = self.draft.mode == StickMode::Mouse;
                         ui.horizontal_top(|ui| {
                             ui.spacing_mut().item_spacing.x = GAP;
                             ui.vertical(|ui| {
                                 ui.set_width(LEFT_W);
                                 self.axes_card(ui, pal);
-                                self.dial_card(ui, pal, live);
+                                if mouse {
+                                    self.test_card(ui, pal, live);
+                                } else {
+                                    self.dial_card(ui, pal, live);
+                                }
                             });
                             ui.vertical(|ui| {
                                 ui.set_width(RIGHT_W);
-                                self.deadzone_card(ui, pal);
-                                self.presets_card(ui, pal);
+                                if mouse {
+                                    self.mouse_card(ui, pal);
+                                    self.mouse_presets_card(ui, pal);
+                                } else {
+                                    self.deadzone_card(ui, pal);
+                                    self.presets_card(ui, pal);
+                                }
                             });
                         });
                     });
@@ -255,7 +334,7 @@ impl StickEditor {
     // ---------------------------------------------------------------- partes
 
     /// Faixa de título. Retorna `true` se o × foi clicado.
-    fn header(&self, ui: &mut Ui, pal: &Palette) -> bool {
+    fn header(&mut self, ui: &mut Ui, pal: &Palette) -> bool {
         let mut close = false;
         let frame = egui::Frame::new()
             .fill(pal.chrome)
@@ -270,13 +349,10 @@ impl StickEditor {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(format!(
-                            "Mapeamento por Ângulo · {}",
-                            stick_title(self.stick)
-                        ))
-                        .size(16.0)
-                        .strong()
-                        .color(pal.text),
+                        RichText::new(format!("Mapeamento do Stick · {}", stick_title(self.stick)))
+                            .size(16.0)
+                            .strong()
+                            .color(pal.text),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let x = egui::Button::new(
@@ -285,6 +361,10 @@ impl StickEditor {
                         .frame(false);
                         if ui.add(x).on_hover_text("Fechar sem salvar").clicked() {
                             close = true;
+                        }
+                        ui.add_space(8.0);
+                        if let Some(mode) = mode_toggle(ui, pal, self.draft.mode) {
+                            self.set_mode(mode);
                         }
                     });
                 });
@@ -518,39 +598,7 @@ impl StickEditor {
 
     fn deadzone_card(&mut self, ui: &mut Ui, pal: &Palette) {
         card(ui, pal, |ui| {
-            let mut dz = self.deadzone();
-            ui.horizontal(|ui| {
-                ui.label(heading(pal, "ZONA MORTA"));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    egui::Frame::new()
-                        .fill(ACCENT.gamma_multiply(0.12))
-                        .stroke(Stroke::new(1.0, ACCENT.gamma_multiply(0.5)))
-                        .corner_radius(5)
-                        .inner_margin(Margin::symmetric(6, 1))
-                        .show(ui, |ui| {
-                            ui.label(
-                                RichText::new(format!("{:.0}%", dz * 100.0))
-                                    .size(11.0)
-                                    .strong()
-                                    .color(ACCENT),
-                            );
-                        });
-                });
-            });
-            ui.scope(|ui| {
-                ui.spacing_mut().slider_width = ui.available_width();
-                ui.visuals_mut().widgets.inactive.bg_fill = pal.switch_off;
-                let slider = egui::Slider::new(&mut dz, 0.05..=0.95)
-                    .show_value(false)
-                    .trailing_fill(true);
-                if ui
-                    .add(slider)
-                    .on_hover_text("Quanto o stick precisa sair do centro para acionar um setor.")
-                    .changed()
-                {
-                    self.draft.deadzone = Some((dz * 100.0).round() / 100.0);
-                }
-            });
+            self.deadzone_row(ui, pal);
             ui.separator();
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
@@ -576,6 +624,16 @@ impl StickEditor {
                 });
             });
         });
+    }
+
+    fn deadzone_row(&mut self, ui: &mut Ui, pal: &Palette) {
+        let mut dz = self.deadzone();
+        title_row(ui, pal, "ZONA MORTA", &format!("{:.0}%", dz * 100.0));
+        let resp = slider(ui, pal, &mut dz, 0.05..=0.95)
+            .on_hover_text("Quanto o stick precisa sair do centro para agir.");
+        if resp.changed() {
+            self.draft.deadzone = Some((dz * 100.0).round() / 100.0);
+        }
     }
 
     fn presets_card(&mut self, ui: &mut Ui, pal: &Palette) {
@@ -634,6 +692,178 @@ impl StickEditor {
                     s.key = None;
                 }
             }
+        });
+    }
+
+    // ------------------------------------------------------------ modo mouse
+
+    /// Área onde um cursor de mentira anda com o stick, na mesma velocidade
+    /// que o jogo vai receber, sem precisar ativar o mapeamento.
+    fn test_card(&mut self, ui: &mut Ui, pal: &Palette, live: &Live) {
+        let (ax, ay) = self.axes();
+        let (x, y) = (live.axis(ax), live.axis(ay));
+        let (vx, vy) = self.draft.mouse.velocity(x, y, self.deadzone());
+        let speed = vx.hypot(vy);
+        card(ui, pal, |ui| {
+            let chip = if speed > 0.0 {
+                format!("~{:.0} px/s", speed)
+            } else {
+                "parado".to_owned()
+            };
+            title_row(ui, pal, "ÁREA DE TESTE", &chip);
+            let (rect, _) =
+                ui.allocate_exact_size(vec2(ui.available_width(), DIAL_H - 30.0), Sense::hover());
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(rect, 8.0, pal.dial_bg);
+            // Grade de pontos.
+            let mut gy = rect.top() + 10.0;
+            while gy < rect.bottom() {
+                let mut gx = rect.left() + 10.0;
+                while gx < rect.right() {
+                    painter.circle_filled(Pos2::new(gx, gy), 1.0, pal.dial_line);
+                    gx += 20.0;
+                }
+                gy += 20.0;
+            }
+
+            // Pixels de tela viram pontos do egui, para a velocidade ser a real.
+            let dt = ui.input(|i| i.stable_dt).min(0.05);
+            let step = vec2(vx, vy) * dt / ui.ctx().pixels_per_point();
+            let t = &mut self.test;
+            if step != egui::Vec2::ZERO {
+                let half = rect.size() / 2.0;
+                let mut p = t.pos + step;
+                // Saindo por um lado, volta pelo outro; o rastro recomeça.
+                let wrapped = p.x.abs() > half.x || p.y.abs() > half.y;
+                if p.x.abs() > half.x {
+                    p.x -= p.x.signum() * rect.width();
+                }
+                if p.y.abs() > half.y {
+                    p.y -= p.y.signum() * rect.height();
+                }
+                if wrapped {
+                    t.trail.clear();
+                }
+                t.pos = p;
+                t.trail.push_back(p);
+                if t.trail.len() > TRAIL {
+                    t.trail.pop_front();
+                }
+                ui.ctx().request_repaint();
+            } else if !t.trail.is_empty() {
+                t.trail.pop_front();
+                ui.ctx().request_repaint();
+            }
+            let c = rect.center();
+            let points: Vec<Pos2> = t.trail.iter().map(|&p| c + p).collect();
+            if points.len() > 1 {
+                painter.add(Shape::line(
+                    points,
+                    Stroke::new(2.0, ACCENT.gamma_multiply(0.7)),
+                ));
+            }
+            cursor_icon(&painter, c + t.pos, pal);
+
+            // Stick pequeno no canto, com a zona morta.
+            let sc = rect.left_bottom() + vec2(36.0, -36.0);
+            painter.circle(sc, 26.0, pal.bar, Stroke::new(1.5, pal.dial_line));
+            dashed_circle(
+                &painter,
+                sc,
+                26.0 * self.deadzone(),
+                Stroke::new(1.0, ACCENT),
+            );
+            let knob = sc + vec2(x, y).clamp(vec2(-1.0, -1.0), vec2(1.0, 1.0)) * 20.0;
+            painter.line_segment([sc, knob], Stroke::new(2.0, ACCENT));
+            painter.circle_filled(knob, 4.5, ACCENT);
+            painter.text(
+                rect.right_bottom() - vec2(10.0, 10.0),
+                Align2::RIGHT_BOTTOM,
+                "Mova o stick para testar",
+                FontId::proportional(11.0),
+                pal.text_muted,
+            );
+        });
+    }
+
+    fn mouse_card(&mut self, ui: &mut Ui, pal: &Palette) {
+        card(ui, pal, |ui| {
+            let m = &mut self.draft.mouse;
+            title_row(ui, pal, "VELOCIDADE", &format!("{:.0} px/s", m.speed));
+            slider(ui, pal, &mut m.speed, 200.0..=3000.0)
+                .on_hover_text("Velocidade do cursor com o stick no fim do curso.");
+            m.speed = (m.speed / 50.0).round() * 50.0;
+            ui.separator();
+
+            let feel = if m.curve < 1.4 {
+                "Linear"
+            } else if m.curve < 2.3 {
+                "Suave"
+            } else {
+                "Preciso"
+            };
+            title_row(ui, pal, "PRECISÃO", feel);
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(64.0, 44.0), Sense::hover());
+                curve_preview(ui.painter(), r, m.curve, pal);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    slider(ui, pal, &mut m.curve, 1.0..=3.0).on_hover_text(
+                        "Mais precisão deixa o começo do curso lento, para mirar, \
+                         sem perder a velocidade no fim.",
+                    );
+                    m.curve = (m.curve * 10.0).round() / 10.0;
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Linear").size(11.0).color(pal.text_muted));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.label(RichText::new("Preciso").size(11.0).color(pal.text_muted));
+                        });
+                    });
+                });
+            });
+            ui.separator();
+            self.deadzone_row(ui, pal);
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    ui.label(RichText::new("Inverter eixo Y").strong().color(pal.text));
+                    ui.label(
+                        RichText::new("Para cima move o cursor para baixo.")
+                            .size(11.0)
+                            .color(pal.text_muted),
+                    );
+                });
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let m = &mut self.draft.mouse;
+                    if switch(ui, pal, m.invert_y).clicked() {
+                        m.invert_y = !m.invert_y;
+                    }
+                });
+            });
+        });
+    }
+
+    fn mouse_presets_card(&mut self, ui: &mut Ui, pal: &Palette) {
+        card(ui, pal, |ui| {
+            ui.label(heading(pal, "PRESETS DE MOUSE"));
+            ui.spacing_mut().item_spacing.y = 6.0;
+            let m = &mut self.draft.mouse;
+            let current = MOUSE_PRESETS
+                .iter()
+                .position(|p| p.speed == m.speed && p.curve == m.curve);
+            for (k, preset) in MOUSE_PRESETS.iter().enumerate() {
+                if list_row(ui, pal, preset.label, current == Some(k), true).clicked() {
+                    *m = MouseSettings {
+                        speed: preset.speed,
+                        curve: preset.curve,
+                        ..*m
+                    };
+                }
+            }
+            list_row(ui, pal, "⚙  Personalizado", current.is_none(), false).on_hover_text(
+                "Fica marcado quando a velocidade e a precisão não são de um preset.",
+            );
         });
     }
 
@@ -767,6 +997,137 @@ fn axis_field(ui: &mut Ui, pal: &Palette, label: &str, axis: Axis, picking: bool
     resp.on_hover_text(format!("{axis}. Clique e mova o stick para trocar o eixo."))
 }
 
+/// Seletor Teclas | Mouse. Retorna o modo escolhido quando muda.
+fn mode_toggle(ui: &mut Ui, pal: &Palette, current: StickMode) -> Option<StickMode> {
+    let options = [(StickMode::Sectors, "Teclas"), (StickMode::Mouse, "Mouse")];
+    let cell = vec2(78.0, 24.0);
+    let (rect, _) = ui.allocate_exact_size(
+        vec2(cell.x * options.len() as f32 + 6.0, cell.y + 6.0),
+        Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 8.0, pal.toggle_bg);
+    let mut chosen = None;
+    for (i, (mode, label)) in options.into_iter().enumerate() {
+        let r = Rect::from_min_size(rect.min + vec2(3.0 + cell.x * i as f32, 3.0), cell);
+        let resp = ui.interact(r, ui.scope_id().with(("mode", i)), Sense::click());
+        let selected = mode == current;
+        if selected {
+            ui.painter().rect(
+                r,
+                6.0,
+                pal.toggle_on,
+                Stroke::new(1.0, pal.button_border),
+                StrokeKind::Inside,
+            );
+        }
+        let color = if selected || resp.hovered() {
+            pal.text
+        } else {
+            pal.text_muted
+        };
+        ui.painter().text(
+            r.center(),
+            Align2::CENTER_CENTER,
+            label,
+            FontId::proportional(12.5),
+            color,
+        );
+        if resp.clicked() && !selected {
+            chosen = Some(mode);
+        }
+    }
+    chosen
+}
+
+/// Título de seção com o valor num selo à direita.
+fn title_row(ui: &mut Ui, pal: &Palette, title: &str, value: &str) {
+    ui.horizontal(|ui| {
+        ui.label(heading(pal, title));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            egui::Frame::new()
+                .fill(pal.key_bg)
+                .corner_radius(5)
+                .inner_margin(Margin::symmetric(6, 1))
+                .show(ui, |ui| {
+                    ui.label(RichText::new(value).size(11.0).strong().color(pal.key_text));
+                });
+        });
+    });
+}
+
+/// Deslizante na largura toda, com o trilho na cor do tema.
+fn slider(
+    ui: &mut Ui,
+    pal: &Palette,
+    value: &mut f32,
+    range: std::ops::RangeInclusive<f32>,
+) -> Response {
+    ui.scope(|ui| {
+        ui.spacing_mut().slider_width = ui.available_width();
+        ui.visuals_mut().widgets.inactive.bg_fill = pal.switch_off;
+        ui.add(
+            egui::Slider::new(value, range)
+                .show_value(false)
+                .trailing_fill(true),
+        )
+    })
+    .inner
+}
+
+/// Gráfico pequeno da curva de resposta: força do stick → velocidade.
+fn curve_preview(painter: &egui::Painter, r: Rect, curve: f32, pal: &Palette) {
+    painter.rect_filled(r, 6.0, pal.dial_bg);
+    let inner = r.shrink(6.0);
+    painter.line_segment(
+        [inner.left_bottom(), inner.right_bottom()],
+        Stroke::new(1.0, pal.dial_line),
+    );
+    painter.line_segment(
+        [inner.left_bottom(), inner.left_top()],
+        Stroke::new(1.0, pal.dial_line),
+    );
+    let points = (0..=20)
+        .map(|k| {
+            let t = k as f32 / 20.0;
+            Pos2::new(
+                inner.left() + t * inner.width(),
+                inner.bottom() - t.powf(curve) * inner.height(),
+            )
+        })
+        .collect();
+    painter.add(Shape::line(points, Stroke::new(2.0, ACCENT)));
+}
+
+/// Seta de cursor com a ponta em `tip`.
+fn cursor_icon(painter: &egui::Painter, tip: Pos2, pal: &Palette) {
+    let p = |x: f32, y: f32| tip + vec2(x, y);
+    let points = vec![
+        p(0.0, 0.0),
+        p(0.0, 17.0),
+        p(4.5, 13.0),
+        p(7.5, 19.5),
+        p(10.0, 18.5),
+        p(7.0, 12.0),
+        p(12.5, 12.0),
+    ];
+    painter.add(Shape::closed_line(
+        points.clone(),
+        Stroke::new(2.5, pal.bar),
+    ));
+    // Não é convexo: pinta em dois triângulos e contorna por cima.
+    painter.add(Shape::convex_polygon(
+        vec![p(0.0, 0.0), p(0.0, 17.0), p(12.5, 12.0)],
+        pal.text,
+        Stroke::NONE,
+    ));
+    painter.add(Shape::convex_polygon(
+        vec![p(4.5, 13.0), p(7.5, 19.5), p(10.0, 18.5), p(7.0, 12.0)],
+        pal.text,
+        Stroke::NONE,
+    ));
+    painter.add(Shape::closed_line(points, Stroke::new(1.0, pal.text)));
+}
+
 /// Linha da lista de presets. `clickable: false` só mostra o estado.
 fn list_row(ui: &mut Ui, pal: &Palette, text: &str, selected: bool, clickable: bool) -> Response {
     let sense = if clickable {
@@ -880,6 +1241,47 @@ mod tests {
         let b = StickBinding::new(PRESETS[2].sectors(), false);
         let up_right = b.sector_at_angle(45.0).unwrap();
         assert_eq!(b.sectors[up_right].key, Some(Key::E.into()));
+    }
+
+    #[test]
+    fn mouse_presets_are_valid() {
+        for preset in MOUSE_PRESETS {
+            let mut b = StickBinding::new(Vec::new(), false);
+            b.mode = StickMode::Mouse;
+            b.mouse.speed = preset.speed;
+            b.mouse.curve = preset.curve;
+            let mut p = Profile::from_toml("name='t'").unwrap();
+            p.sticks.insert(Stick::Right, b);
+            assert!(Profile::from_toml(&p.to_toml()).is_ok(), "{}", preset.label);
+        }
+        // O padrão do núcleo é o primeiro preset.
+        let d = MouseSettings::default();
+        assert_eq!(
+            (d.speed, d.curve),
+            (MOUSE_PRESETS[0].speed, MOUSE_PRESETS[0].curve)
+        );
+    }
+
+    #[test]
+    fn mode_switch_moves_default_deadzone() {
+        let p = Profile::from_toml(include_str!("../../../profiles/default.toml")).unwrap();
+        let mut ed = StickEditor::new(Stick::Right, &p);
+        ed.set_mode(StickMode::Mouse);
+        assert_eq!(ed.deadzone(), MOUSE_DEADZONE);
+        ed.set_mode(StickMode::Sectors);
+        assert_eq!(&ed.finish(), &p.sticks[&Stick::Right]);
+        // Uma zona morta escolhida pelo usuário fica como está.
+        ed.draft.deadzone = Some(0.3);
+        ed.set_mode(StickMode::Mouse);
+        assert_eq!(ed.deadzone(), 0.3);
+    }
+
+    #[test]
+    fn mouse_stick_without_sectors_gets_free_ones() {
+        let p = Profile::from_toml("name='t'\n[sticks.right]\nmode='mouse'\n").unwrap();
+        let ed = StickEditor::new(Stick::Right, &p);
+        assert_eq!(ed.draft.sectors.len(), 4);
+        assert!(ed.draft.sectors.iter().all(|s| s.key.is_none()));
     }
 
     #[test]

@@ -1,13 +1,14 @@
 use crate::codes::windows_scancode;
-use crate::{KeyAction, KeyboardSink, OutputError};
+use crate::{KeyAction, OutputError, OutputSink};
 use std::mem::size_of;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
-    KEYEVENTF_SCANCODE,
+    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
+    KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MOUSEEVENTF_MOVE, MOUSEINPUT,
 };
 
 /// Injeta teclas com `SendInput` usando scancodes, que funcionam tanto em
-/// aplicativos comuns quanto na maioria dos jogos.
+/// aplicativos comuns quanto na maioria dos jogos, e move o mouse com
+/// movimento relativo (`MOUSEEVENTF_MOVE`), que jogos com Raw Input também leem.
 ///
 /// Observação: o Windows bloqueia a injeção em janelas de processos com
 /// privilégio maior (UIPI). Para controlar um jogo rodando como administrador,
@@ -20,7 +21,7 @@ impl SendInputSink {
     }
 }
 
-impl KeyboardSink for SendInputSink {
+impl OutputSink for SendInputSink {
     fn send(&mut self, action: KeyAction) -> Result<(), OutputError> {
         let (key, up) = match action {
             KeyAction::Press(k) => (k, false),
@@ -46,15 +47,34 @@ impl KeyboardSink for SendInputSink {
                 },
             },
         };
-        // SAFETY: um único INPUT válido, com o tamanho correto da struct.
-        let sent = unsafe { SendInput(1, &input, size_of::<INPUT>() as i32) };
-        if sent == 1 {
-            Ok(())
-        } else {
-            Err(OutputError::Send(format!(
-                "SendInput recusou {key} ({})",
-                std::io::Error::last_os_error()
-            )))
-        }
+        send_input(&input).map_err(|e| OutputError::Send(format!("SendInput recusou {key} ({e})")))
+    }
+
+    fn move_mouse(&mut self, dx: i32, dy: i32) -> Result<(), OutputError> {
+        let input = INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dx,
+                    dy,
+                    mouseData: 0,
+                    dwFlags: MOUSEEVENTF_MOVE,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        send_input(&input)
+            .map_err(|e| OutputError::Send(format!("SendInput recusou o movimento do mouse ({e})")))
+    }
+}
+
+fn send_input(input: &INPUT) -> Result<(), std::io::Error> {
+    // SAFETY: um único INPUT válido, com o tamanho correto da struct.
+    let sent = unsafe { SendInput(1, input, size_of::<INPUT>() as i32) };
+    if sent == 1 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
     }
 }

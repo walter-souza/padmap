@@ -1,4 +1,4 @@
-//! Thread que lê o controle e envia as teclas.
+//! Thread que lê o controle e envia as teclas e o movimento do mouse.
 //!
 //! O mapeamento roda aqui, e não no loop da interface, porque a janela só é
 //! redesenhada quando algo muda e fica parada quando está sem foco, que é
@@ -6,10 +6,15 @@
 
 use padmap_core::{InputEvent, KeyAction, Mapper, Profile};
 use padmap_input::{GamepadSource, SourceEvent};
-use padmap_output::{platform_sink, KeyboardSink};
+use padmap_output::{platform_sink, OutputSink};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// Quanto o laço espera por um evento do controle. Com um stick em modo mouse
+/// fora da zona morta a espera encurta, para o cursor andar liso (~250 Hz).
+const IDLE_WAIT: Duration = Duration::from_millis(10);
+const MOUSE_WAIT: Duration = Duration::from_millis(4);
 
 pub enum Command {
     SetProfile(Profile),
@@ -67,25 +72,33 @@ struct State {
     mapper: Mapper,
     active: bool,
     dry_run: bool,
-    sink: Option<Box<dyn KeyboardSink>>,
+    sink: Option<Box<dyn OutputSink>>,
     status: Sender<Status>,
 }
 
 impl State {
+    /// O sink nativo, criado na primeira vez. Se falhar, desativa o mapeamento.
+    fn sink(&mut self) -> Option<&mut Box<dyn OutputSink>> {
+        if self.sink.is_none() {
+            match platform_sink() {
+                Ok(s) => self.sink = Some(s),
+                Err(e) => {
+                    let _ = self.status.send(Status::Error(e.to_string()));
+                    self.active = false;
+                    return None;
+                }
+            }
+        }
+        self.sink.as_mut()
+    }
+
     fn emit(&mut self, actions: Vec<KeyAction>) {
         for action in actions {
             if !self.dry_run {
-                if self.sink.is_none() {
-                    match platform_sink() {
-                        Ok(s) => self.sink = Some(s),
-                        Err(e) => {
-                            let _ = self.status.send(Status::Error(e.to_string()));
-                            self.active = false;
-                            return;
-                        }
-                    }
-                }
-                if let Err(e) = self.sink.as_mut().unwrap().send(action) {
+                let Some(sink) = self.sink() else {
+                    return;
+                };
+                if let Err(e) = sink.send(action) {
                     let _ = self.status.send(Status::Error(e.to_string()));
                 }
             }
@@ -99,6 +112,23 @@ impl State {
     fn release_all(&mut self) {
         let actions = self.mapper.release_all();
         self.emit(actions);
+    }
+
+    /// Anda o mouse pelo tempo que passou. Roda a cada volta do laço, com ou
+    /// sem evento, porque o stick parado inclinado não gera eventos.
+    fn move_mouse(&mut self, dt: Duration) {
+        let (dx, dy) = self.mapper.tick(dt);
+        if !self.active || self.dry_run || (dx, dy) == (0, 0) {
+            return;
+        }
+        let Some(sink) = self.sink() else {
+            return;
+        };
+        if let Err(e) = sink.move_mouse(dx, dy) {
+            // Desativa para não repetir o mesmo erro centenas de vezes por segundo.
+            let _ = self.status.send(Status::Error(e.to_string()));
+            self.active = false;
+        }
     }
 }
 
@@ -118,6 +148,7 @@ fn run(profile: Profile, commands: Receiver<Command>, status: Sender<Status>, re
         sink: None,
         status: status.clone(),
     };
+    let mut last_tick = Instant::now();
 
     loop {
         loop {
@@ -145,7 +176,16 @@ fn run(profile: Profile, commands: Receiver<Command>, status: Sender<Status>, re
             }
         }
 
-        let Some(event) = source.next_event(Duration::from_millis(10)) else {
+        let wait = if st.active && st.mapper.mouse_moving() {
+            MOUSE_WAIT
+        } else {
+            IDLE_WAIT
+        };
+        let event = source.next_event(wait);
+        let now = Instant::now();
+        st.move_mouse(now - last_tick);
+        last_tick = now;
+        let Some(event) = event else {
             continue;
         };
         match event {

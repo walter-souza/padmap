@@ -8,9 +8,9 @@ use crate::slots::{stick_click, stick_short, stick_title, Slot};
 use crate::theme::{Palette, ACCENT, ACCENT_STRONG, ACTIVE};
 use eframe::egui::{
     self, vec2, Align2, Color32, FontId, Galley, Pos2, Rect, Response, Sense, Shape, Stroke,
-    StrokeKind, Ui,
+    StrokeKind, Ui, Vec2,
 };
-use padmap_core::{Axis, Button, Profile, Stick};
+use padmap_core::{Axis, Button, Profile, Stick, StickMode};
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::TAU;
 use std::sync::Arc;
@@ -33,17 +33,44 @@ impl Live {
         }
     }
 
-    /// Setores com tecla que o stick está acionando agora.
+    /// Setores com tecla que o stick está acionando agora. Vazio no modo mouse.
     pub fn stick_sectors(&self, profile: &Profile, stick: Stick) -> Vec<usize> {
         let Some(binding) = profile.sticks.get(&stick) else {
             return Vec::new();
         };
+        if binding.mode == StickMode::Mouse {
+            return Vec::new();
+        }
         let (ax, ay) = binding.axes(stick);
         binding
             .sectors_at(self.axis(ax), self.axis(ay), profile.deadzone(stick))
             .into_iter()
             .filter(|&i| binding.sectors[i].key.is_some())
             .collect()
+    }
+
+    /// Força com que o stick em modo mouse move o cursor agora, de 0 a 1 (já
+    /// pela curva), e a direção. `None` se o stick não está em modo mouse.
+    pub fn stick_mouse(&self, profile: &Profile, stick: Stick) -> Option<(f32, Vec2)> {
+        let binding = profile.sticks.get(&stick)?;
+        if binding.mode != StickMode::Mouse {
+            return None;
+        }
+        let (ax, ay) = binding.axes(stick);
+        let (vx, vy) =
+            binding
+                .mouse
+                .velocity(self.axis(ax), self.axis(ay), profile.deadzone(stick));
+        let v = vec2(vx, vy);
+        Some((v.length() / binding.mouse.speed, v.normalized()))
+    }
+
+    /// O stick está agindo: acionando um setor ou movendo o mouse.
+    pub fn stick_engaged(&self, profile: &Profile, stick: Stick) -> bool {
+        match self.stick_mouse(profile, stick) {
+            Some((force, _)) => force > 0.0,
+            None => !self.stick_sectors(profile, stick).is_empty(),
+        }
     }
 }
 
@@ -482,7 +509,7 @@ impl Stage<'_> {
     }
 
     fn stick_engaged(&self, stick: Stick) -> bool {
-        !self.live.stick_sectors(self.profile, stick).is_empty()
+        self.live.stick_engaged(self.profile, stick)
     }
 
     fn stick(&mut self, stick: Stick, x: f32, y: f32) {
@@ -519,10 +546,7 @@ impl Stage<'_> {
             .circle_filled(cap, 4.0 * self.s, Color32::from_rgb(0x0A, 0x0C, 0x14));
         let resp = self
             .interact(Rect::from_center_size(c, vec2(68.0, 68.0) * self.s), stick)
-            .on_hover_text(format!(
-                "{}: clique para editar os setores",
-                stick_title(stick)
-            ));
+            .on_hover_text(format!("{}: clique para editar", stick_title(stick)));
         self.hover_ring(&resp, c, 34.0);
         if resp.clicked() {
             self.clicked = Some(Click::EditStick(stick));
@@ -761,11 +785,16 @@ impl Stage<'_> {
             .filter_map(|&i| binding?.sectors[i].key.as_ref())
             .map(|c| c.to_string().to_uppercase())
             .collect();
-        let engaged = !active.is_empty();
+        let mouse = self.live.stick_mouse(self.profile, stick);
+        let engaged = self.live.stick_engaged(self.profile, stick);
         let any_mapped = binding.is_some_and(|b| b.sectors.iter().any(|s| s.key.is_some()));
 
-        // Selo de cima: tecla acionada agora, ou INATIVO / LIVRE.
-        let (badge, bg, border, color) = if engaged {
+        // Selo de cima: tecla acionada agora, MOUSE, ou INATIVO / LIVRE.
+        let (badge, bg, border, color) = if mouse.is_some() && engaged {
+            ("MOUSE".to_owned(), pal.active_bg, ACTIVE, pal.text)
+        } else if mouse.is_some() {
+            ("MOUSE".to_owned(), pal.key_bg, pal.key_bg, pal.key_text)
+        } else if engaged {
             (active.join(" + "), pal.active_bg, ACTIVE, pal.text)
         } else if any_mapped {
             (
@@ -803,7 +832,21 @@ impl Stage<'_> {
             .circle(c, 64.4 * s, pal.stick_bg, self.stroke(3.5, ring));
 
         let (x, y) = (self.live.axis(ax), self.live.axis(ay));
-        if let Some(b) = binding {
+        if let Some((force, dir)) = mouse {
+            // Seta do centro para onde o cursor anda, do tamanho da força.
+            if force > 0.0 {
+                let tip = c + dir * (16.0 * s + force * (reach - 22.0 * s));
+                let stroke = self.stroke(3.0, ACTIVE);
+                self.painter.line_segment([c, tip], stroke);
+                let side = vec2(-dir.y, dir.x) * 6.0 * s;
+                let back = tip - dir * 9.0 * s;
+                self.painter.add(Shape::convex_polygon(
+                    vec![tip, back + side, back - side],
+                    ACTIVE,
+                    Stroke::NONE,
+                ));
+            }
+        } else if let Some(b) = binding {
             for &i in &sectors {
                 wedge(
                     &self.painter,
@@ -855,8 +898,13 @@ impl Stage<'_> {
                 ("panel", stick),
             )
             .on_hover_text(format!(
-                "{}: clique para editar os setores",
-                stick_title(stick)
+                "{}: clique para editar {}",
+                stick_title(stick),
+                if mouse.is_some() {
+                    "o mouse"
+                } else {
+                    "os setores"
+                }
             ));
         if resp.hovered() {
             self.painter

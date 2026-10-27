@@ -217,6 +217,25 @@ sectors=[{start=0.0}]
     }
 
     #[test]
+    fn mouse_stick_round_trips_and_keeps_sectors() {
+        let mut p = Profile::from_toml(include_str!("../../../profiles/default.toml")).unwrap();
+        let b = p.sticks.get_mut(&Stick::Right).unwrap();
+        b.mode = crate::stick::StickMode::Mouse;
+        b.mouse.speed = 900.0;
+        b.mouse.invert_y = true;
+        let text = p.to_toml();
+        assert!(text.contains("mode = \"mouse\""), "{text}");
+        assert_eq!(Profile::from_toml(&text).unwrap(), p);
+        // Sem `mode`, o stick continua por setores.
+        assert!(
+            !Profile::from_toml(include_str!("../../../profiles/default.toml"))
+                .unwrap()
+                .to_toml()
+                .contains("mode")
+        );
+    }
+
+    #[test]
     fn rejects_unknown_button() {
         let err = Profile::from_toml("name = \"x\"\n[buttons]\nbanana = \"A\"\n");
         assert!(err.is_err());

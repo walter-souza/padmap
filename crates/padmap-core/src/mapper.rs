@@ -7,8 +7,9 @@
 use crate::gamepad::{Axis, Button, InputEvent};
 use crate::key::{Key, KeyCombo};
 use crate::profile::Profile;
-use crate::stick::{angle_of, Stick};
+use crate::stick::{angle_of, Stick, StickMode};
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyAction {
@@ -29,12 +30,19 @@ enum Source {
 /// tecla pisque, ou que dois setores vizinhos acionem juntos, na divisa.
 const SECTOR_HYSTERESIS: f32 = 3.0;
 
+/// Maior intervalo que um `tick` considera. Depois de uma pausa longa (a thread
+/// atrasou, o PC travou) o cursor não dá um salto.
+const MAX_TICK: Duration = Duration::from_millis(50);
+
 pub struct Mapper {
     profile: Profile,
     active: HashSet<Source>,
     held: HashMap<Key, u32>,
     /// Última posição de cada eixo, para calcular o ângulo dos sticks.
     axes: HashMap<Axis, f32>,
+    /// Frações de pixel que sobraram dos `tick`s anteriores, para o cursor
+    /// andar mesmo bem devagar.
+    mouse_rest: (f32, f32),
 }
 
 impl Mapper {
@@ -44,6 +52,7 @@ impl Mapper {
             active: HashSet::new(),
             held: HashMap::new(),
             axes: HashMap::new(),
+            mouse_rest: (0.0, 0.0),
         }
     }
 
@@ -55,7 +64,51 @@ impl Mapper {
     pub fn set_profile(&mut self, profile: Profile) -> Vec<KeyAction> {
         let out = self.release_all();
         self.profile = profile;
+        self.mouse_rest = (0.0, 0.0);
         out
+    }
+
+    /// Movimento do mouse, em pixels inteiros, desde o último `tick`. O stick
+    /// parado inclinado não gera eventos, então quem roda o `Mapper` chama isto
+    /// a cada volta do laço, passando o tempo que passou.
+    pub fn tick(&mut self, dt: Duration) -> (i32, i32) {
+        let dt = dt.min(MAX_TICK).as_secs_f32();
+        let (mut vx, mut vy) = (0.0, 0.0);
+        for (&stick, b) in &self.profile.sticks {
+            if b.mode != StickMode::Mouse {
+                continue;
+            }
+            let (x, y) = self.stick_pos(stick);
+            let (sx, sy) = b.mouse.velocity(x, y, self.profile.deadzone(stick));
+            vx += sx;
+            vy += sy;
+        }
+        if vx == 0.0 && vy == 0.0 {
+            self.mouse_rest = (0.0, 0.0);
+            return (0, 0);
+        }
+        let x = self.mouse_rest.0 + vx * dt;
+        let y = self.mouse_rest.1 + vy * dt;
+        let (dx, dy) = (x.trunc(), y.trunc());
+        self.mouse_rest = (x - dx, y - dy);
+        (dx as i32, dy as i32)
+    }
+
+    /// Se algum stick em modo mouse está fora da zona morta. Enquanto isso, vale
+    /// chamar `tick` com mais frequência para o cursor andar liso.
+    pub fn mouse_moving(&self) -> bool {
+        self.profile.sticks.iter().any(|(&stick, b)| {
+            let (x, y) = self.stick_pos(stick);
+            b.mode == StickMode::Mouse && x.hypot(y) > self.profile.deadzone(stick)
+        })
+    }
+
+    fn stick_pos(&self, stick: Stick) -> (f32, f32) {
+        let (ax, ay) = self.profile.sticks[&stick].axes(stick);
+        (
+            self.axes.get(&ax).copied().unwrap_or(0.0),
+            self.axes.get(&ay).copied().unwrap_or(0.0),
+        )
     }
 
     pub fn handle(&mut self, event: InputEvent) -> Vec<KeyAction> {
@@ -122,11 +175,10 @@ impl Mapper {
 
     fn stick(&mut self, stick: Stick, out: &mut Vec<KeyAction>) {
         let binding = &self.profile.sticks[&stick];
-        let (ax, ay) = binding.axes(stick);
-        let (x, y) = (
-            self.axes.get(&ax).copied().unwrap_or(0.0),
-            self.axes.get(&ay).copied().unwrap_or(0.0),
-        );
+        if binding.mode == StickMode::Mouse {
+            return;
+        }
+        let (x, y) = self.stick_pos(stick);
         let press_at = self.profile.deadzone(stick);
         let release_at = press_at * self.profile.settings.release_ratio;
         let (r, angle) = (x.hypot(y), angle_of(x, y));
@@ -315,6 +367,40 @@ sectors=[{start=45.0,key='Up'},{start=135.0},{start=225.0},{start=315.0,key='Rig
         out.extend(m.handle(InputEvent::AxisMotion(Axis::RightX, 0.7)));
         out.sort_by_key(|a| format!("{a:?}"));
         assert_eq!(out, [Press(Key::Right), Press(Key::Up)]);
+    }
+
+    const MOUSE_STICK: &str = "name='t'
+[sticks.right]
+mode='mouse'
+deadzone=0.2
+mouse={speed=1000.0,curve=1.0}
+sectors=[{start=45.0,key='Up'}]
+";
+
+    #[test]
+    fn mouse_stick_moves_by_time_not_keys() {
+        let mut m = mapper(MOUSE_STICK);
+        assert!(m
+            .handle(InputEvent::AxisMotion(Axis::RightX, 1.0))
+            .is_empty());
+        assert!(m.mouse_moving());
+        assert_eq!(m.tick(Duration::from_millis(10)), (10, 0));
+        // Parado inclinado continua andando a cada tick.
+        assert_eq!(m.tick(Duration::from_millis(10)), (10, 0));
+        // Um tick longo demais é limitado.
+        assert_eq!(m.tick(Duration::from_secs(1)), (50, 0));
+        m.handle(InputEvent::AxisMotion(Axis::RightX, 0.0));
+        assert!(!m.mouse_moving());
+        assert_eq!(m.tick(Duration::from_millis(10)), (0, 0));
+    }
+
+    #[test]
+    fn slow_mouse_accumulates_fractions() {
+        let mut m = mapper(MOUSE_STICK);
+        // Força 0.1 → 100 px/s → 0.1 px a cada ms.
+        m.handle(InputEvent::AxisMotion(Axis::RightY, 0.28));
+        let total: i32 = (0..25).map(|_| m.tick(Duration::from_millis(1)).1).sum();
+        assert_eq!(total, 2);
     }
 
     #[test]

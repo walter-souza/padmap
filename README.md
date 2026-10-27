@@ -33,11 +33,20 @@ cargo run --release -p padmap-gui
   etiqueta, ou "Deixar livre" no modal, deixa o botão livre.
 - **Sticks:** os dois círculos embaixo mostram em amarelo o setor que está
   acionando uma tecla. Clique num deles (ou em LS / RS) para abrir o
-  **Mapeamento por Ângulo**: o círculo do stick dividido em setores, cada um com
-  sua tecla. Arraste as alças para mudar as divisas, clique num setor e aperte a
-  tecla, botão direito deixa o setor livre. Também tem presets de 4 e 8
-  direções, a zona morta do stick, o disparo compartilhado (setores vizinhos
-  acionam juntos na diagonal) e os eixos que o stick usa.
+  **Mapeamento do Stick**, que tem dois modos (seletor no topo):
+  - **Teclas:** o círculo do stick dividido em setores, cada um com sua tecla.
+    Arraste as alças para mudar as divisas, clique num setor e aperte a tecla,
+    botão direito deixa o setor livre. Também tem presets de 4 e 8 direções, a
+    zona morta do stick e o disparo compartilhado (setores vizinhos acionam
+    juntos na diagonal).
+  - **Mouse:** o stick move o cursor. Ajuste a velocidade (pixels por segundo
+    com o stick no fim do curso), a precisão (curva: mais precisão deixa o
+    começo do curso lento, para mirar), a zona morta e a inversão do Y, ou use
+    um dos presets. A área de teste mostra um cursor andando com o stick, na
+    velocidade real, sem precisar ativar o mapeamento. Os setores ficam
+    guardados para quando você voltar às teclas.
+
+  Nos dois modos dá para trocar os eixos que o stick usa.
 - **Testar sem risco:** com "Simulação" ligada, "Ativar mapeamento" só mostra
   no log as teclas que seriam enviadas. Desligue para enviar de verdade. O log
   abre pelo botão "Log" no rodapé.
@@ -90,6 +99,12 @@ sectors = [
     { start = 315.0, key = "D" },
 ]
 
+# Stick como mouse. Os setores, se houver, ficam guardados.
+[sticks.right]
+mode = "mouse"
+deadzone = 0.15
+mouse = { speed = 1200, curve = 2.0, invert_y = false }   # todos opcionais
+
 [axes.right_trigger]
 positive = "LShift"
 threshold = 0.3
@@ -101,7 +116,10 @@ left_paddle1 left_paddle2 right_paddle1 right_paddle2 touchpad`.
 
 Sticks: `left right`. Por padrão usam `left_x/left_y` e `right_x/right_y`;
 `x_axis` e `y_axis` trocam os eixos. Perfis antigos com `[axes.left_x]` e
-afins continuam abrindo: viram quatro setores com disparo compartilhado.
+afins continuam abrindo: viram quatro setores com disparo compartilhado. No
+modo mouse, `speed` é a velocidade em pixels por segundo com o stick no fim do
+curso e `curve` o expoente da resposta (1 é linear; maior é mais preciso no
+começo do curso).
 
 Eixos: `left_x left_y right_x right_y left_trigger right_trigger`
 (Y negativo é para cima).

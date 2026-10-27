@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use padmap_core::{Mapper, Profile};
+use padmap_core::{Mapper, Profile, StickMode};
 use padmap_input::{GamepadSource, SourceEvent};
-use padmap_output::{platform_sink, DryRunSink, KeyboardSink};
+use padmap_output::{platform_sink, DryRunSink, OutputSink};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Parser)]
 #[command(
@@ -115,6 +115,16 @@ fn check(path: &PathBuf) -> Result<()> {
             profile.deadzone(*stick),
             if b.shared { ", compartilhado" } else { "" }
         );
+        if b.mode == StickMode::Mouse {
+            let m = &b.mouse;
+            println!(
+                "    mouse: {} px/s, curva {}{}",
+                m.speed,
+                m.curve,
+                if m.invert_y { ", Y invertido" } else { "" }
+            );
+            continue;
+        }
         for (i, sector) in b.sectors.iter().enumerate() {
             let key = sector
                 .key
@@ -134,7 +144,7 @@ fn run(path: &PathBuf, dry_run: bool) -> Result<()> {
     let profile = Profile::load(path)?;
     log::info!("perfil carregado: {}", profile.name);
     let mut mapper = Mapper::new(profile);
-    let mut sink: Box<dyn KeyboardSink> = if dry_run {
+    let mut sink: Box<dyn OutputSink> = if dry_run {
         Box::new(DryRunSink)
     } else {
         platform_sink()?
@@ -144,8 +154,19 @@ fn run(path: &PathBuf, dry_run: bool) -> Result<()> {
     // Por enquanto todos os controles conectados compartilham o mesmo perfil.
     // Perfis por controle entram quando houver a interface gráfica.
     log::info!("rodando; Ctrl+C para sair");
+    let mut last_tick = Instant::now();
     while running.load(Ordering::SeqCst) {
-        match source.next_event(Duration::from_millis(100)) {
+        // Com um stick em modo mouse fora da zona morta, espera menos para o
+        // cursor andar liso; o stick parado inclinado não gera eventos.
+        let wait = if mapper.mouse_moving() { 4 } else { 100 };
+        let event = source.next_event(Duration::from_millis(wait));
+        let now = Instant::now();
+        let (dx, dy) = mapper.tick(now - last_tick);
+        last_tick = now;
+        if (dx, dy) != (0, 0) {
+            sink.move_mouse(dx, dy)?;
+        }
+        match event {
             Some(SourceEvent::Connected { id, name }) => {
                 log::info!("controle {id} conectado: {name}")
             }

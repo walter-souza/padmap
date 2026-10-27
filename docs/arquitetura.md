@@ -16,7 +16,7 @@
 crates/
   padmap-core    tipos (Button, Axis, Key), perfis TOML e o Mapper. Sem SDL nem SO; 100% testável.
   padmap-input   GamepadSource: SDL3 -> InputEvent normalizado.
-  padmap-output  trait KeyboardSink + backends:
+  padmap-output  trait OutputSink + backends:
                    windows.rs  SendInput com scancodes (KEYEVENTF_SCANCODE)
                    linux.rs    teclado virtual via /dev/uinput (X11 e Wayland)
                    macos.rs    CGEventPost (exige permissão de Acessibilidade)
@@ -26,7 +26,7 @@ crates/
   padmap-cli     binário de linha de comando `padmap-cli` (list, monitor, check, run).
 ```
 
-Fluxo: `GamepadSource::next_event` -> `Mapper::handle` -> `Vec<KeyAction>` -> `KeyboardSink::send`.
+Fluxo: `GamepadSource::next_event` -> `Mapper::handle` -> `Vec<KeyAction>` -> `OutputSink::send`.
 
 ## Decisões
 
@@ -44,6 +44,18 @@ Fluxo: `GamepadSource::next_event` -> `Mapper::handle` -> `Vec<KeyAction>` -> `K
   borda e só solta 3° para fora, então a divisa não pisca nem aciona dois
   setores juntos. Os eixos soltos dos sticks em perfis antigos são convertidos
   em setores ao carregar.
+- **Stick como mouse.** No modo `mouse` o stick não aciona setores: a
+  inclinação, fora da zona morta, vira uma força de 0 a 1 que passa pela curva
+  (`força^curve`) e multiplica a velocidade. Como o stick parado inclinado não
+  gera eventos, o movimento é por tempo: quem roda o `Mapper` chama
+  `Mapper::tick(dt)` a cada volta do laço e manda o `(dx, dy)` ao
+  `OutputSink::move_mouse`. As frações de pixel se acumulam entre os ticks e o
+  `dt` tem teto de 50 ms, para o cursor não saltar depois de uma pausa. Com um
+  stick em modo mouse fora da zona morta o laço espera 4 ms em vez de 10 ms
+  (cerca de 250 movimentos por segundo). O movimento é relativo nos três
+  sistemas (`MOUSEEVENTF_MOVE`, `REL_X`/`REL_Y` no uinput); no macOS o CGEvent
+  exige posição absoluta, então a posição atual é lida e somada ao
+  deslocamento, com os campos de delta preenchidos para os jogos.
 - **Eventos em segundo plano.** O hint `SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS`
   é ligado porque o foco está sempre no jogo, não no padmap.
 - **Mapeamento fora da interface.** A janela do egui só é redesenhada quando
@@ -57,5 +69,5 @@ Fluxo: `GamepadSource::next_event` -> `Mapper::handle` -> `Vec<KeyAction>` -> `K
 1. Testar em Windows com controles reais (Xbox, DualSense, genérico).
 2. Ícone na bandeja e troca de perfil por atalho no controle.
 3. Perfis por controle e por jogo (detectar o processo em primeiro plano).
-4. Mapear para mouse (stick como cursor), turbo, macros e camadas (segurar um botão muda o mapa).
+4. Botões que clicam o mouse, rolagem pelo stick, turbo, macros e camadas (segurar um botão muda o mapa).
 5. Instalador Windows (MSI/winget) e pacotes Linux/macOS.
