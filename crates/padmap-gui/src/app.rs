@@ -298,7 +298,7 @@ impl PadmapApp {
 
                 let (dot, name) = match self.pads.values().next() {
                     Some(n) => (GOOD, n.as_str()),
-                    None => (pal.text_muted, "Nenhum controle conectado"),
+                    None => (pal.chrome_muted, "Nenhum controle conectado"),
                 };
                 ui.label(RichText::new(name).color(pal.free_text));
                 let (r, _) = ui.allocate_exact_size(vec2(8.0, 8.0), Sense::hover());
@@ -311,9 +311,9 @@ impl PadmapApp {
 
     fn footer(&mut self, ui: &mut egui::Ui, pal: &Palette) {
         ui.horizontal_centered(|ui| {
-            ui.label(RichText::new("Teclas seguradas").color(pal.text_muted));
+            ui.label(RichText::new("Teclas seguradas").color(pal.chrome_muted));
             if self.held.is_empty() {
-                ui.label(RichText::new("nenhuma").color(pal.text_muted).weak());
+                ui.label(RichText::new("nenhuma").color(pal.chrome_muted).weak());
             }
             for k in &self.held {
                 egui::Frame::new()
@@ -346,7 +346,7 @@ impl PadmapApp {
                     RichText::new(
                         "Clique numa etiqueta e aperte a tecla. Botão direito deixa livre.",
                     )
-                    .color(pal.text_muted),
+                    .color(pal.chrome_muted),
                 );
             });
         });
@@ -488,7 +488,7 @@ fn theme_toggle(ui: &mut egui::Ui, pal: &Palette, current: Theme) -> Option<Them
         let color = if selected || resp.hovered() {
             pal.text
         } else {
-            pal.text_muted
+            pal.chrome_muted
         };
         let c = cell.center();
         match theme {
@@ -533,9 +533,9 @@ impl eframe::App for PadmapApp {
 
         let bar = |top: bool| {
             egui::Frame::new()
-                .fill(pal.bar)
+                .fill(pal.chrome)
                 .inner_margin(Margin::symmetric(28, if top { 11 } else { 8 }))
-                .stroke(Stroke::new(1.0, pal.bar_border))
+                .stroke(Stroke::new(1.0, pal.chrome_border))
         };
         egui::Panel::top("header")
             .frame(bar(true))

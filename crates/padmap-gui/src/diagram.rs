@@ -611,7 +611,7 @@ impl Stage<'_> {
     fn lines(&self) {
         for co in CALLOUTS {
             let color = if co.slot.get(self.profile).is_some() {
-                ACCENT
+                self.pal.mapped_line
             } else {
                 self.pal.free_line
             };
@@ -659,11 +659,11 @@ impl Stage<'_> {
         } else {
             (
                 pal.mapped_bg,
-                ACCENT,
+                pal.mapped_border,
                 pal.mapped_text,
-                ACCENT,
-                ACCENT,
-                Color32::WHITE,
+                pal.key_bg,
+                pal.key_bg,
+                pal.key_text,
             )
         };
         let key = if capturing {
@@ -698,15 +698,8 @@ impl Stage<'_> {
             .interact(rect, ("callout", co.label))
             .on_hover_text("Clique para trocar a tecla.\nBotão direito deixa livre.");
         let r = 8.0 * s;
-        if combo.is_some() && !capturing {
-            self.painter.rect_filled(
-                rect.expand(2.0 * s),
-                r + 2.0 * s,
-                ACCENT.gamma_multiply(0.07),
-            );
-        }
         let border_w = if resp.hovered() { 2.0 } else { 1.0 };
-        let border = if resp.hovered() && combo.is_none() {
+        let border = if resp.hovered() && !capturing && !pressed {
             ACCENT
         } else {
             border

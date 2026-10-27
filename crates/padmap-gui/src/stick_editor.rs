@@ -257,8 +257,8 @@ impl StickEditor {
     /// Faixa de título. Retorna `true` se o × foi clicado.
     fn header(&self, ui: &mut Ui, pal: &Palette) -> bool {
         let mut close = false;
-        egui::Frame::new()
-            .fill(pal.header_bg)
+        let frame = egui::Frame::new()
+            .fill(pal.chrome)
             .corner_radius(CornerRadius {
                 nw: 14,
                 ne: 14,
@@ -276,18 +276,23 @@ impl StickEditor {
                         ))
                         .size(16.0)
                         .strong()
-                        .color(Color32::WHITE),
+                        .color(pal.text),
                     );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let x =
-                            egui::Button::new(RichText::new("×").size(18.0).color(Color32::WHITE))
-                                .frame(false);
+                        let x = egui::Button::new(
+                            RichText::new("×").size(18.0).color(pal.chrome_muted),
+                        )
+                        .frame(false);
                         if ui.add(x).on_hover_text("Fechar sem salvar").clicked() {
                             close = true;
                         }
                     });
                 });
             });
+        // Mesma linha que separa o cabeçalho da tela principal.
+        let r = frame.response.rect;
+        ui.painter()
+            .hline(r.x_range(), r.bottom(), Stroke::new(1.0, pal.chrome_border));
         close
     }
 
