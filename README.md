@@ -22,16 +22,28 @@ Detalhes em [docs/arquitetura.md](docs/arquitetura.md).
 cargo run --release -p padmap-gui
 ```
 
-![Tela principal](docs/tela-principal.png)
+![Tela principal no modo claro](docs/tela-principal.png)
 
-- **Controle ao vivo:** o desenho acende os botões, mostra a posição dos sticks
-  e o quanto os gatilhos estão apertados. Os controles conectados aparecem acima.
-- **Mapear:** clique numa parte do desenho ou em "Capturar" e aperte a tecla
-  (ou combinação, como `Ctrl+S`) no teclado. Também dá para digitar o nome da tecla.
-- **Testar sem risco:** com "Simulação" marcado, "Ativar mapeamento" só mostra
-  no log as teclas que seriam enviadas. Desmarque para enviar de verdade.
-- **Perfis:** Novo, Abrir, Salvar e Salvar como, em arquivos `.toml`.
-- **Sensibilidade:** ajuste em que ponto sticks e gatilhos acionam e soltam a tecla.
+- **Controle ao vivo:** o desenho acende os botões, move os sticks e enche os
+  gatilhos conforme você mexe no controle. A etiqueta da tecla que está sendo
+  enviada fica destacada. O controle conectado aparece no topo.
+- **Mapear:** cada botão tem uma etiqueta ligada a ele por uma linha. Clique na
+  etiqueta (ou no próprio botão do desenho) e aperte a tecla ou combinação, como
+  `Ctrl+S`. Botão direito na etiqueta deixa o botão livre.
+- **Sticks:** os dois círculos embaixo mostram em amarelo o setor que está
+  acionando uma tecla. Clique em LS ou RS para escolher a tecla de cada direção.
+- **Testar sem risco:** com "Simulação" ligada, "Ativar mapeamento" só mostra
+  no log as teclas que seriam enviadas. Desligue para enviar de verdade. O log
+  abre pelo botão "Log" no rodapé.
+- **Perfis:** Novo, Abrir e Salvar no topo; renomear e "Salvar como…" no menu
+  do nome do perfil.
+- **Modo claro e escuro:** o botão de sol e lua no topo troca o tema, e a
+  escolha fica salva para a próxima vez.
+
+![Tela principal no modo escuro](docs/tela-principal-escura.png)
+
+A sensibilidade dos sticks e gatilhos continua no perfil (`axis_threshold` e
+`release_ratio`); ela vai ganhar uma janela própria na interface.
 
 O mapeamento continua funcionando com a janela minimizada ou com o jogo em primeiro plano.
 

@@ -90,7 +90,8 @@ pub fn button_label(b: Button) -> &'static str {
     }
 }
 
-/// Ordem em que as linhas aparecem no editor, agrupadas.
+/// Todos os botões e eixos, agrupados. Hoje só os testes usam a lista.
+#[cfg(test)]
 pub const GROUPS: &[(&str, &[Slot])] = &[
     (
         "Botões de ação",
