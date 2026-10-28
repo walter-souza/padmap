@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 const LOG_LINES: usize = 300;
 const THEME_KEY: &str = "theme";
+const AUTOSAVE_KEY: &str = "autosave";
 /// Caminho do último perfil aberto, para reabrir na próxima vez.
 const LAST_PROFILE_KEY: &str = "last_profile";
 
@@ -20,6 +21,8 @@ pub struct PadmapApp {
     profile: Profile,
     path: Option<PathBuf>,
     dirty: bool,
+    /// Salvar sozinho a cada alteração do perfil.
+    autosave: bool,
     /// Pasta de perfis. `None` se não deu para usá-la; aí salvar pergunta onde.
     library: Option<Library>,
     /// Perfis da pasta, relidos ao abrir o menu do perfil e após cada ação.
@@ -85,6 +88,10 @@ impl PadmapApp {
             profile,
             path,
             dirty: false,
+            autosave: cc
+                .storage
+                .and_then(|s| s.get_string(AUTOSAVE_KEY))
+                .is_some_and(|v| v == "on"),
             library,
             entries,
             search: String::new(),
@@ -106,6 +113,31 @@ impl PadmapApp {
     fn profile_changed(&mut self) {
         self.dirty = true;
         self.worker.send(Command::SetProfile(self.profile.clone()));
+        if self.autosave && self.path.is_some() {
+            self.save();
+        }
+    }
+
+    fn set_autosave(&mut self, on: bool) {
+        self.autosave = on;
+        // Ligar com alterações pendentes já grava, para não ficar nada para trás.
+        if on && self.dirty && self.path.is_some() {
+            self.save();
+        }
+    }
+
+    /// Volta o perfil ao que está salvo no arquivo, descartando as alterações.
+    fn revert(&mut self) {
+        let Some(path) = self.path.clone() else {
+            return;
+        };
+        match Profile::load(&path) {
+            Ok(p) => {
+                self.push_log(format!("Alterações desfeitas: {}", p.name));
+                self.replace_profile(p, Some(path));
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
     }
 
     fn set_slot(&mut self, slot: Slot, combo: Option<KeyCombo>) {
@@ -468,6 +500,36 @@ impl PadmapApp {
                     },
                 );
             }
+            ProfileDialog::Revert => {
+                dialog_window(
+                    ui.ctx(),
+                    pal,
+                    "Desfazer alterações",
+                    |ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "Voltar o perfil \u{201c}{current}\u{201d} ao último salvamento?"
+                            ))
+                            .strong()
+                            .color(pal.text),
+                        );
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new("As alterações feitas desde então serão perdidas.")
+                                .size(12.0)
+                                .color(pal.text_muted),
+                        );
+                    },
+                    |ui| {
+                        if ui.add(primary_button("Desfazer", BAD)).clicked() {
+                            choice.set(Some(Choice::Confirm));
+                        }
+                        if ui.button("Cancelar").clicked() {
+                            choice.set(Some(Choice::Cancel));
+                        }
+                    },
+                );
+            }
             ProfileDialog::Unsaved { .. } => {
                 dialog_window(
                     ui.ctx(),
@@ -532,6 +594,10 @@ impl PadmapApp {
                     error: Some(e),
                 })
             }
+            (ProfileDialog::Revert, _) => {
+                self.revert();
+                Ok(())
+            }
             (ProfileDialog::Unsaved { next }, choice) => {
                 if choice == Choice::Confirm {
                     self.save();
@@ -588,6 +654,23 @@ impl PadmapApp {
                 }
             });
 
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.label(RichText::new("Salvar automaticamente").color(pal.text));
+                ui.label(
+                    RichText::new("Grava cada alteração na hora.")
+                        .size(11.0)
+                        .color(pal.text_muted),
+                );
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if switch(ui, pal, self.autosave).clicked() {
+                    self.set_autosave(!self.autosave);
+                }
+            });
+        });
         ui.separator();
         let mut new = false;
         let mut import = false;
@@ -654,16 +737,36 @@ impl PadmapApp {
             }
             egui::Popup::menu(&resp).show(|ui| self.profile_menu(ui, pal));
             ui.add_space(4.0);
-            let save_tip = if self.dirty {
-                "Salvar (há alterações não salvas)"
+            if self.autosave && self.path.is_some() {
+                ui.label(
+                    RichText::new("Salvo automaticamente")
+                        .size(11.5)
+                        .color(pal.chrome_muted),
+                )
+                .on_hover_text(
+                    "Desligue em \u{201c}Salvar automaticamente\u{201d}, no menu do perfil.",
+                );
             } else {
-                "Salvar"
-            };
-            if icon_button(ui, pal, Icon::Save, self.dirty)
-                .on_hover_text(save_tip)
-                .clicked()
-            {
-                self.save();
+                ui.spacing_mut().item_spacing.x = 2.0;
+                let save_tip = if self.dirty {
+                    "Salvar (há alterações não salvas)"
+                } else {
+                    "Salvar"
+                };
+                if icon_button(ui, pal, Icon::Save, self.dirty)
+                    .on_hover_text(save_tip)
+                    .clicked()
+                {
+                    self.save();
+                }
+                if self.dirty
+                    && self.path.is_some()
+                    && icon_button(ui, pal, Icon::Revert, false)
+                        .on_hover_text("Desfazer alterações não salvas")
+                        .clicked()
+                {
+                    self.profile_dialog = Some(ProfileDialog::Revert);
+                }
             }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -840,6 +943,8 @@ enum ProfileDialog {
     },
     /// Trocar para `next` com o perfil aberto ainda com alterações.
     Unsaved { next: PathBuf },
+    /// Voltar o perfil aberto ao que está salvo.
+    Revert,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1127,6 +1232,7 @@ fn profile_button(ui: &mut egui::Ui, pal: &Palette, name: &str) -> egui::Respons
 #[derive(Clone, Copy)]
 enum Icon {
     Save,
+    Revert,
 }
 
 /// Ícone clicável da barra do topo. `alert` pinta o ícone em azul com um ponto,
@@ -1170,6 +1276,20 @@ fn icon_button(ui: &mut egui::Ui, pal: &Palette, icon: Icon, alert: bool) -> egu
                 stroke,
                 StrokeKind::Middle,
             );
+        }
+        Icon::Revert => {
+            // Seta curva voltando, sentido anti-horário.
+            let r = 6.0;
+            let arc: Vec<egui::Pos2> = (0..=16)
+                .map(|k| {
+                    let a = (-150.0 + 240.0 * k as f32 / 16.0).to_radians();
+                    at(a.cos() * r, a.sin() * r + 1.0)
+                })
+                .collect();
+            let tip = arc[0];
+            p.add(egui::Shape::line(arc, stroke));
+            p.line_segment([tip, tip + vec2(0.5, -4.0)], stroke);
+            p.line_segment([tip, tip + vec2(4.0, 0.8)], stroke);
         }
     }
     if alert {
@@ -1332,6 +1452,8 @@ impl eframe::App for PadmapApp {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(THEME_KEY, theme::name(self.theme).to_owned());
+        let autosave = if self.autosave { "on" } else { "off" };
+        storage.set_string(AUTOSAVE_KEY, autosave.to_owned());
         if let Some(path) = &self.path {
             storage.set_string(LAST_PROFILE_KEY, path.display().to_string());
         }

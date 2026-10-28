@@ -61,8 +61,11 @@ cargo run --release -p padmap-gui
   nome), Duplicar, Exportar (uma cópia para compartilhar) e Excluir (vai para a
   lixeira). Embaixo da lista ficam "Novo perfil" e "Importar…", que traz para a
   pasta um perfil de fora. O ícone ao lado do nome salva, e ganha um ponto
-  quando há alterações não salvas; trocar de perfil com alterações pergunta se
-  é para salvar ou descartar.
+  quando há alterações não salvas; a seta ao lado dele desfaz essas alterações,
+  voltando ao último salvamento. Trocar de perfil com alterações pergunta se é
+  para salvar ou descartar. Com "Salvar automaticamente" ligado (no menu do
+  perfil), cada alteração é gravada na hora e os dois ícones dão lugar ao aviso
+  "Salvo automaticamente".
 - **Modo claro e escuro:** o botão de sol e lua no topo troca o tema, e a
   escolha fica salva para a próxima vez.
 
