@@ -46,7 +46,8 @@ pub struct PadmapApp {
     adding: Option<Option<String>>,
     active: bool,
     dry_run: bool,
-    pads: BTreeMap<u32, String>,
+    /// Controles conectados: nome e se tem touchpad.
+    pads: BTreeMap<u32, (String, bool)>,
     live: Live,
     held: BTreeSet<Key>,
     log: VecDeque<String>,
@@ -189,12 +190,12 @@ impl PadmapApp {
                         "Não foi possível iniciar a leitura de controles: {e}"
                     ))
                 }
-                Status::Connected { id, name } => {
+                Status::Connected { id, name, touchpad } => {
                     self.push_log(format!("Controle conectado: {name}"));
-                    self.pads.insert(id, name);
+                    self.pads.insert(id, (name, touchpad));
                 }
                 Status::Disconnected { id } => {
-                    if let Some(name) = self.pads.remove(&id) {
+                    if let Some((name, _)) = self.pads.remove(&id) {
                         self.push_log(format!("Controle desconectado: {name}"));
                     }
                     if self.pads.is_empty() {
@@ -985,7 +986,7 @@ impl PadmapApp {
                 ui.add_space(12.0);
 
                 let (color, name) = match self.pads.values().next() {
-                    Some(n) => (GOOD, n.as_str()),
+                    Some((n, _)) => (GOOD, n.as_str()),
                     None => (pal.chrome_muted, "Nenhum controle conectado"),
                 };
                 ui.label(RichText::new(name).color(pal.chrome_muted));
@@ -1716,7 +1717,15 @@ impl eframe::App for PadmapApp {
                 match self.tab {
                     Tab::Controller => {
                         let capturing = self.capture.as_ref().map(|(s, _)| *s);
-                        match diagram::show(ui, pal, &self.live, &self.profile, capturing) {
+                        // O touchpad aparece com um controle que tenha um. Sem
+                        // controle, aparece se o perfil já o mapeia.
+                        let touchpad = if self.pads.is_empty() {
+                            self.profile.touchpad.is_some()
+                        } else {
+                            self.pads.values().any(|&(_, t)| t)
+                        };
+                        match diagram::show(ui, pal, &self.live, &self.profile, capturing, touchpad)
+                        {
                             Some(Click::Map(slot)) => {
                                 self.capture = Some((slot, Capture::default()))
                             }

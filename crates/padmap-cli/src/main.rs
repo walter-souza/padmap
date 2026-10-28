@@ -167,7 +167,7 @@ fn run(path: &PathBuf, dry_run: bool) -> Result<()> {
             sink.move_mouse(dx, dy)?;
         }
         match event {
-            Some(SourceEvent::Connected { id, name }) => {
+            Some(SourceEvent::Connected { id, name, .. }) => {
                 log::info!("controle {id} conectado: {name}")
             }
             Some(SourceEvent::Disconnected { id }) => {

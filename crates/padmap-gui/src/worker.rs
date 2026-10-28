@@ -25,10 +25,19 @@ pub enum Command {
 
 pub enum Status {
     InitFailed(String),
-    Connected { id: u32, name: String },
-    Disconnected { id: u32 },
+    Connected {
+        id: u32,
+        name: String,
+        touchpad: bool,
+    },
+    Disconnected {
+        id: u32,
+    },
     Input(InputEvent),
-    Key { action: KeyAction, simulated: bool },
+    Key {
+        action: KeyAction,
+        simulated: bool,
+    },
     Error(String),
 }
 
@@ -189,8 +198,8 @@ fn run(profile: Profile, commands: Receiver<Command>, status: Sender<Status>, re
             continue;
         };
         match event {
-            SourceEvent::Connected { id, name } => {
-                let _ = status.send(Status::Connected { id, name });
+            SourceEvent::Connected { id, name, touchpad } => {
+                let _ = status.send(Status::Connected { id, name, touchpad });
             }
             SourceEvent::Disconnected { id } => {
                 st.release_all();

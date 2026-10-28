@@ -18,6 +18,8 @@ pub enum SourceEvent {
     Connected {
         id: u32,
         name: String,
+        /// O controle tem touchpad (DualShock 4, DualSense…).
+        touchpad: bool,
     },
     Disconnected {
         id: u32,
@@ -99,7 +101,8 @@ impl GamepadSource {
                 let name = pad.name().unwrap_or_else(|| "controle desconhecido".into());
                 let mapped = mapped_buttons(&pad);
                 log_buttons(&pad, &name, mapped.as_ref());
-                if pad.touchpads_count() > 0 {
+                let touchpad = pad.touchpads_count() > 0;
+                if touchpad {
                     log::info!(
                         "{name}: touchpad com até {} dedos",
                         pad.supported_touchpad_fingers(0)
@@ -109,6 +112,7 @@ impl GamepadSource {
                 Some(SourceEvent::Connected {
                     id: which.raw(),
                     name,
+                    touchpad,
                 })
             }
             Event::GamepadRemoved { which, .. } => {

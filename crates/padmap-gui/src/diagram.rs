@@ -1143,13 +1143,15 @@ impl Stage<'_> {
     }
 }
 
-/// Desenha a tela e retorna o que foi clicado, se algo foi.
+/// Desenha a tela e retorna o que foi clicado, se algo foi. `touchpad` diz se
+/// o painel do touchpad aparece.
 pub fn show(
     ui: &mut Ui,
     pal: &Palette,
     live: &Live,
     profile: &Profile,
     capturing: Option<Slot>,
+    touchpad: bool,
 ) -> Option<Click> {
     let avail = ui.available_rect_before_wrap();
     ui.allocate_rect(avail, Sense::hover());
@@ -1179,7 +1181,9 @@ pub fn show(
     }
     st.stick_panel(Stick::Left, 370.0);
     st.stick_panel(Stick::Right, 630.0);
-    st.touchpad_panel(500.0);
+    if touchpad {
+        st.touchpad_panel(500.0);
+    }
     st.clicked
 }
 
