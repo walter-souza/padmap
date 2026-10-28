@@ -132,6 +132,10 @@ pub struct StickEditor {
     capture: Option<(usize, Capture)>,
     picking: Option<Field>,
     dragging: Option<usize>,
+    /// Quanto a lista de setores girou desde que o editor abriu. Os setores
+    /// ficam ordenados a partir de 0°, então uma divisa que cruza 0° muda o
+    /// índice de todos; somar isso ao índice mantém a cor de cada setor.
+    color_shift: usize,
     test: TestCursor,
 }
 
@@ -166,6 +170,7 @@ impl StickEditor {
             capture: None,
             picking: None,
             dragging: None,
+            color_shift: 0,
             test: TestCursor::default(),
         }
     }
@@ -323,6 +328,10 @@ impl StickEditor {
             .filter(|&s| s != i)
             .map(|s| self.draft.sectors[s].start);
         let moved = self.draft.move_start(i, angle);
+        // A divisa não passa da vizinha: mudar de índice só acontece ao cruzar
+        // 0°, e aí a lista inteira gira de `i - moved` posições.
+        let n = self.draft.sectors.len();
+        self.color_shift = (self.color_shift + i + n - moved) % n;
         self.dragging = Some(moved);
         self.selected = if self.selected == Some(i) {
             Some(moved)
@@ -493,7 +502,7 @@ impl StickEditor {
 
         let painter = ui.painter_at(rect);
         let b = &self.draft;
-        let color = |i: usize| SECTOR_COLORS[i % SECTOR_COLORS.len()];
+        let color = |i: usize| sector_color(i, self.color_shift, n);
 
         painter.circle_stroke(c, r_out + 5.0, Stroke::new(1.0, pal.bar_border));
         for i in 0..n {
@@ -675,6 +684,7 @@ impl StickEditor {
             for (k, preset) in PRESETS.iter().enumerate() {
                 if list_row(ui, pal, preset.label, current == Some(k), true).clicked() {
                     self.draft.sectors = preset.sectors();
+                    self.color_shift = 0;
                     self.selected = None;
                 }
             }
@@ -1228,6 +1238,11 @@ fn capture_overlay(
     action
 }
 
+/// Cor do setor `i` de `n`, descontado o giro da lista (`shift`).
+fn sector_color(i: usize, shift: usize, n: usize) -> Color32 {
+    SECTOR_COLORS[(i + shift) % n.max(1) % SECTOR_COLORS.len()]
+}
+
 /// Faixa de `r0` a `r1` entre os ângulos `from` e `to`, com a cor indo
 /// suavemente de `colors.0` (em `from`) a `colors.1` (em `to`).
 fn blend_band(
@@ -1327,6 +1342,32 @@ mod tests {
             (d.speed, d.curve),
             (MOUSE_PRESETS[0].speed, MOUSE_PRESETS[0].curve)
         );
+    }
+
+    #[test]
+    fn colors_follow_sectors_across_zero() {
+        let p = Profile::from_toml(include_str!("../../../profiles/default.toml")).unwrap();
+        let mut ed = StickEditor::new(Stick::Left, &p);
+        let n = ed.draft.sectors.len();
+        let color_of = |ed: &StickEditor, key: &str| {
+            let i = ed
+                .draft
+                .sectors
+                .iter()
+                .position(|s| s.key == Some(key.parse().unwrap()))
+                .unwrap();
+            sector_color(i, ed.color_shift, n)
+        };
+        let before: Vec<_> = ["W", "A", "S", "D"].map(|k| color_of(&ed, k)).into();
+        // W começa em 45°; passar para 350° cruza 0° e o reordena para o fim.
+        ed.move_boundary(0, 350.0);
+        assert_eq!(ed.draft.sectors[n - 1].key, Some(Key::W.into()));
+        let after: Vec<_> = ["W", "A", "S", "D"].map(|k| color_of(&ed, k)).into();
+        assert_eq!(before, after);
+        // E de volta.
+        ed.move_boundary(n - 1, 20.0);
+        let back: Vec<_> = ["W", "A", "S", "D"].map(|k| color_of(&ed, k)).into();
+        assert_eq!(before, back);
     }
 
     #[test]
