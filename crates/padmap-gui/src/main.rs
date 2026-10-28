@@ -4,10 +4,12 @@
 mod app;
 mod capture;
 mod diagram;
+mod extras;
 mod profiles;
 mod slots;
 mod stick_editor;
 mod theme;
+mod touchpad_editor;
 mod worker;
 
 fn main() -> eframe::Result {

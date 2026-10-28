@@ -1,12 +1,16 @@
 use crate::capture::{self, Capture};
 use crate::diagram::{self, Click, Live};
+use crate::extras;
 use crate::profiles::{self, Entry, Library, DEFAULT_PROFILE};
-use crate::slots::Slot;
+use crate::slots::{extra_default_name, Slot, OFF_DIAGRAM};
 use crate::stick_editor::{Outcome, StickEditor};
 use crate::theme::{self, Palette, ACCENT, ACCENT_STRONG, ACTIVE, BAD, GOOD};
+use crate::touchpad_editor::{self, TouchpadEditor};
 use crate::worker::{Command, Status, Worker};
 use eframe::egui::{self, vec2, Color32, Margin, Rect, RichText, Sense, Stroke, StrokeKind, Theme};
-use padmap_core::{InputEvent, Key, KeyAction, KeyCombo, Profile};
+use padmap_core::{
+    Button, ExtraButton, ExtraSource, InputEvent, Key, KeyAction, KeyCombo, Profile, TouchActivate,
+};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 
@@ -34,6 +38,12 @@ pub struct PadmapApp {
     capture: Option<(Slot, Capture)>,
     /// Editor de setores do stick, quando aberto.
     stick_editor: Option<StickEditor>,
+    touchpad_editor: Option<TouchpadEditor>,
+    /// Aba da área central: o desenho do controle ou os botões extras.
+    tab: Tab,
+    /// Esperando um botão do controle para a lista de extras. Guarda o aviso
+    /// mostrado quando o botão apertado não serve (ex.: já está no desenho).
+    adding: Option<Option<String>>,
     active: bool,
     dry_run: bool,
     pads: BTreeMap<u32, String>,
@@ -98,6 +108,9 @@ impl PadmapApp {
             profile_dialog: None,
             capture: None,
             stick_editor: None,
+            touchpad_editor: None,
+            tab: Tab::Controller,
+            adding: None,
             active: false,
             dry_run: true,
             pads: BTreeMap::new(),
@@ -140,6 +153,13 @@ impl PadmapApp {
         }
     }
 
+    fn clear_slot(&mut self, slot: Slot) {
+        if slot.get(&self.profile).is_some() {
+            self.push_log(format!("{}: livre", slot.title(&self.profile)));
+            self.set_slot(slot, None);
+        }
+    }
+
     fn set_slot(&mut self, slot: Slot, combo: Option<KeyCombo>) {
         slot.set(&mut self.profile, combo);
         self.profile_changed();
@@ -179,17 +199,34 @@ impl PadmapApp {
                         self.live = Live::default();
                     }
                 }
-                Status::Input(event) => match event {
-                    InputEvent::ButtonDown(b) => {
-                        self.live.pressed.insert(b);
+                Status::Input(event) => {
+                    match event {
+                        InputEvent::ButtonDown(b) => {
+                            self.live.pressed.insert(b);
+                        }
+                        InputEvent::ButtonUp(b) => {
+                            self.live.pressed.remove(&b);
+                        }
+                        InputEvent::AxisMotion(a, v) => {
+                            self.live.axes.insert(a, v);
+                        }
+                        InputEvent::OtherButtonDown(n) => {
+                            self.live.pressed_other.insert(n);
+                        }
+                        InputEvent::OtherButtonUp(n) => {
+                            self.live.pressed_other.remove(&n);
+                        }
+                        InputEvent::TouchDown(f, x, y) | InputEvent::TouchMove(f, x, y) => {
+                            self.live.touch.insert(f, (x, y));
+                        }
+                        InputEvent::TouchUp(f) => {
+                            self.live.touch.remove(&f);
+                        }
                     }
-                    InputEvent::ButtonUp(b) => {
-                        self.live.pressed.remove(&b);
+                    if self.adding.is_some() {
+                        self.add_extra(event);
                     }
-                    InputEvent::AxisMotion(a, v) => {
-                        self.live.axes.insert(a, v);
-                    }
-                },
+                }
                 Status::Key { action, simulated } => {
                     let tag = if simulated { " (simulação)" } else { "" };
                     let line = match action {
@@ -414,17 +451,20 @@ impl PadmapApp {
         let Some(dialog) = &mut self.profile_dialog else {
             return;
         };
+        // Lido antes de desenhar: o campo de texto consome o Esc.
+        let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
         // O conteúdo e os botões podem decidir; vale a última escolha.
         let choice = std::cell::Cell::new(None);
         let current = self.profile.name.clone();
-        let creating = matches!(dialog, ProfileDialog::Create { .. });
+        let (title, action) = match dialog {
+            ProfileDialog::Create { .. } => ("Novo perfil", "Criar"),
+            ProfileDialog::RenameExtra { .. } => ("Renomear botão", "Renomear"),
+            _ => ("Renomear perfil", "Renomear"),
+        };
         match dialog {
-            ProfileDialog::Rename { name, error, .. } | ProfileDialog::Create { name, error } => {
-                let (title, action) = if creating {
-                    ("Novo perfil", "Criar")
-                } else {
-                    ("Renomear perfil", "Renomear")
-                };
+            ProfileDialog::Rename { name, error, .. }
+            | ProfileDialog::Create { name, error }
+            | ProfileDialog::RenameExtra { name, error, .. } => {
                 dialog_window(
                     ui.ctx(),
                     pal,
@@ -560,7 +600,7 @@ impl PadmapApp {
                 );
             }
         }
-        let choice = if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        let choice = if escape {
             Some(Choice::Cancel)
         } else {
             choice.get()
@@ -573,6 +613,13 @@ impl PadmapApp {
         };
         let result = match (dialog, choice) {
             (_, Choice::Cancel) => Ok(()),
+            (ProfileDialog::RenameExtra { source, name, .. }, _) => self
+                .rename_extra(source, &name)
+                .map_err(|e| ProfileDialog::RenameExtra {
+                    source,
+                    name,
+                    error: Some(e),
+                }),
             (ProfileDialog::Create { name, .. }, _) => {
                 self.create(&name).map_err(|e| ProfileDialog::Create {
                     name,
@@ -716,6 +763,136 @@ impl PadmapApp {
                     error: None,
                 })
             }
+        }
+    }
+
+    // ---------------------------------------------------------- botões extras
+
+    /// Com a janela "Adicionar botão" aberta, o primeiro botão apertado entra
+    /// na lista e a captura da tecla já abre.
+    fn add_extra(&mut self, event: InputEvent) {
+        let source = match event {
+            InputEvent::ButtonDown(b) => {
+                if !OFF_DIAGRAM.contains(&b) {
+                    self.adding = Some(Some(format!(
+                        "\u{201c}{}\u{201d} já está no desenho do controle. Mapeie esse botão na aba Controle.",
+                        Slot::Button(b).title(&self.profile)
+                    )));
+                    return;
+                }
+                let zones_own_click = self
+                    .profile
+                    .touchpad
+                    .as_ref()
+                    .is_some_and(|tp| tp.activate == TouchActivate::Click);
+                if b == Button::Touchpad && zones_own_click {
+                    self.adding = Some(Some(
+                        "O clique do touchpad aciona as zonas do touchpad. Para dar uma tecla só ao clique, mude o touchpad para \u{201c}Ao tocar\u{201d}.".to_owned(),
+                    ));
+                    return;
+                }
+                ExtraSource::Known(b)
+            }
+            InputEvent::OtherButtonDown(n) => ExtraSource::Other(n),
+            _ => return,
+        };
+        if let Some(e) = self.profile.extras.iter().find(|e| e.button == source) {
+            self.adding = Some(Some(format!(
+                "Esse botão já está na lista, como \u{201c}{}\u{201d}.",
+                if e.name.is_empty() {
+                    extra_default_name(source)
+                } else {
+                    e.name.clone()
+                }
+            )));
+            return;
+        }
+        let name = extra_default_name(source);
+        self.push_log(format!("Botão adicionado: {name}"));
+        self.profile.extras.push(ExtraButton {
+            button: source,
+            name,
+            key: None,
+        });
+        self.profile_changed();
+        self.adding = None;
+        self.capture = Some((Slot::Extra(source), Capture::default()));
+    }
+
+    fn remove_extra(&mut self, source: ExtraSource) {
+        let title = Slot::Extra(source).title(&self.profile);
+        self.profile.extras.retain(|e| e.button != source);
+        self.push_log(format!("Botão removido: {title}"));
+        self.profile_changed();
+    }
+
+    fn rename_extra(&mut self, source: ExtraSource, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if let Some(e) = self.profile.extras.iter_mut().find(|e| e.button == source) {
+            e.name = if name.is_empty() {
+                extra_default_name(source)
+            } else {
+                name.to_owned()
+            };
+        }
+        self.profile_changed();
+        Ok(())
+    }
+
+    fn adding_dialog(&mut self, ui: &mut egui::Ui, pal: &Palette) {
+        let Some(notice) = &self.adding else {
+            return;
+        };
+        let notice = notice.clone();
+        let mut cancel = false;
+        let mut to_controller = false;
+        dialog_window(
+            ui.ctx(),
+            pal,
+            "Adicionar botão",
+            |ui| {
+                ui.vertical_centered(|ui| {
+                    let (r, _) = ui.allocate_exact_size(vec2(56.0, 56.0), Sense::hover());
+                    ui.painter().circle_filled(r.center(), 27.0, pal.key_bg);
+                    gamepad_icon(ui.painter(), r.center(), ACCENT);
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new("Aperte qualquer botão no controle")
+                            .strong()
+                            .color(pal.text),
+                    );
+                    ui.add_space(2.0);
+                    ui.label(
+                        RichText::new("Ele entra na lista, e em seguida você escolhe a tecla.")
+                            .size(12.0)
+                            .color(pal.text_muted),
+                    );
+                    if let Some(n) = &notice {
+                        ui.add_space(10.0);
+                        ui.label(RichText::new(n.as_str()).size(12.0).color(BAD));
+                    }
+                });
+            },
+            |ui| {
+                if ui.button("Cancelar").clicked() {
+                    cancel = true;
+                }
+                if notice.as_deref().is_some_and(|n| n.contains("desenho"))
+                    && ui.button("Ir para a aba Controle").clicked()
+                {
+                    to_controller = true;
+                }
+            },
+        );
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            cancel = true;
+        }
+        if to_controller {
+            self.tab = Tab::Controller;
+            cancel = true;
+        }
+        if cancel {
+            self.adding = None;
         }
     }
 
@@ -899,6 +1076,31 @@ impl PadmapApp {
         }
     }
 
+    fn touchpad_modal(&mut self, ui: &mut egui::Ui, pal: &Palette) {
+        let Some(editor) = &mut self.touchpad_editor else {
+            return;
+        };
+        match editor.show(ui.ctx(), pal, &self.live) {
+            Some(touchpad_editor::Outcome::Save(binding)) => {
+                // No modo "ao clicar" o clique do touchpad é das zonas.
+                if binding
+                    .as_ref()
+                    .is_some_and(|b| b.activate == TouchActivate::Click)
+                {
+                    self.profile.buttons.remove(&Button::Touchpad);
+                    self.profile
+                        .extras
+                        .retain(|e| e.button != ExtraSource::Known(Button::Touchpad));
+                }
+                self.profile.touchpad = binding;
+                self.touchpad_editor = None;
+                self.profile_changed();
+            }
+            Some(touchpad_editor::Outcome::Cancel) => self.touchpad_editor = None,
+            None => {}
+        }
+    }
+
     fn capture_modal(&mut self, ui: &mut egui::Ui) {
         let Some((slot, capture)) = &mut self.capture else {
             return;
@@ -909,7 +1111,8 @@ impl PadmapApp {
         let held = capture.keys().to_vec();
         let current = slot.get(&self.profile).cloned();
         let pal = theme::palette(self.theme);
-        let action = capture::modal(ui.ctx(), pal, slot.label(), current.as_ref(), &held);
+        let title = slot.title(&self.profile);
+        let action = capture::modal(ui.ctx(), pal, &title, current.as_ref(), &held);
 
         if let Some(combo) = result {
             self.capture = None;
@@ -919,7 +1122,7 @@ impl PadmapApp {
             match action {
                 capture::ModalAction::Cancel => {}
                 capture::ModalAction::Clear => {
-                    self.push_log(format!("{}: livre", slot.label()));
+                    self.push_log(format!("{title}: livre"));
                     self.set_slot(slot, None);
                 }
                 capture::ModalAction::Pick(combo) => self.set_slot(slot, Some(combo)),
@@ -931,6 +1134,12 @@ impl PadmapApp {
 enum ProfileDialog {
     /// Nome do perfil novo; nada é criado até confirmar.
     Create { name: String, error: Option<String> },
+    /// Nome de um botão da lista de extras.
+    RenameExtra {
+        source: ExtraSource,
+        name: String,
+        error: Option<String>,
+    },
     Rename {
         path: PathBuf,
         name: String,
@@ -1080,7 +1289,7 @@ fn field_style(ui: &mut egui::Ui, pal: &Palette) {
     v.widgets.hovered.bg_stroke = Stroke::new(1.0, ACCENT);
 }
 
-fn primary_button(text: &str, fill: Color32) -> egui::Button<'_> {
+pub(crate) fn primary_button(text: &str, fill: Color32) -> egui::Button<'_> {
     egui::Button::new(RichText::new(text).strong().color(Color32::WHITE))
         .fill(fill)
         .stroke(Stroke::NONE)
@@ -1299,7 +1508,7 @@ fn icon_button(ui: &mut egui::Ui, pal: &Palette, icon: Icon, alert: bool) -> egu
 }
 
 /// Controle pequeno: corpo arredondado, cruz e dois botões.
-fn gamepad_icon(p: &egui::Painter, c: egui::Pos2, color: Color32) {
+pub(crate) fn gamepad_icon(p: &egui::Painter, c: egui::Pos2, color: Color32) {
     let stroke = Stroke::new(1.5, color);
     p.rect_stroke(
         egui::Rect::from_center_size(c, vec2(17.0, 11.0)),
@@ -1311,6 +1520,60 @@ fn gamepad_icon(p: &egui::Painter, c: egui::Pos2, color: Color32) {
     p.line_segment([c + vec2(-4.0, -2.0), c + vec2(-4.0, 2.0)], stroke);
     p.circle_filled(c + vec2(3.0, 1.0), 1.2, color);
     p.circle_filled(c + vec2(5.5, -1.5), 1.2, color);
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Tab {
+    Controller,
+    Extras,
+}
+
+/// Seletor de opções lado a lado (ex.: Teclas | Mouse). Retorna a escolhida
+/// quando muda.
+pub(crate) fn segmented<T: Copy + PartialEq>(
+    ui: &mut egui::Ui,
+    pal: &Palette,
+    options: &[(T, &str)],
+    current: T,
+    cell_width: f32,
+) -> Option<T> {
+    let cell = vec2(cell_width, 24.0);
+    let (rect, _) = ui.allocate_exact_size(
+        vec2(cell.x * options.len() as f32 + 6.0, cell.y + 6.0),
+        Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 8.0, pal.toggle_bg);
+    let mut chosen = None;
+    for (i, &(value, label)) in options.iter().enumerate() {
+        let r = Rect::from_min_size(rect.min + vec2(3.0 + cell.x * i as f32, 3.0), cell);
+        let resp = ui.interact(r, ui.scope_id().with(("segmented", i)), Sense::click());
+        let selected = value == current;
+        if selected {
+            ui.painter().rect(
+                r,
+                6.0,
+                pal.toggle_on,
+                Stroke::new(1.0, pal.button_border),
+                StrokeKind::Inside,
+            );
+        }
+        let color = if selected || resp.hovered() {
+            pal.text
+        } else {
+            pal.text_muted
+        };
+        ui.painter().text(
+            r.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::FontId::proportional(12.5),
+            color,
+        );
+        if resp.clicked() && !selected {
+            chosen = Some(value);
+        }
+    }
+    chosen
 }
 
 /// Interruptor de liga/desliga desenhado à mão.
@@ -1392,8 +1655,9 @@ impl eframe::App for PadmapApp {
         let pal = theme::palette(self.theme);
 
         // Capturando uma tecla, Alt+F4 e afins viram mapeamento, não fecham a janela.
-        let capturing =
-            self.capture.is_some() || self.stick_editor.as_ref().is_some_and(|e| e.capturing());
+        let capturing = self.capture.is_some()
+            || self.stick_editor.as_ref().is_some_and(|e| e.capturing())
+            || self.touchpad_editor.as_ref().is_some_and(|e| e.capturing());
         if capturing && ui.ctx().input(|i| i.viewport().close_requested()) {
             ui.ctx()
                 .send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -1429,25 +1693,63 @@ impl eframe::App for PadmapApp {
                     .inner_margin(Margin::same(16)),
             )
             .show(ui, |ui| {
-                let capturing = self.capture.as_ref().map(|(s, _)| *s);
-                match diagram::show(ui, pal, &self.live, &self.profile, capturing) {
-                    Some(Click::Map(slot)) => self.capture = Some((slot, Capture::default())),
-                    Some(Click::Clear(slot)) => {
-                        if slot.get(&self.profile).is_some() {
-                            self.push_log(format!("{}: livre", slot.label()));
-                            self.set_slot(slot, None);
+                ui.vertical_centered(|ui| {
+                    let n = self.profile.extras.len();
+                    let extras_label = if n > 0 {
+                        format!("Botões extras · {n}")
+                    } else {
+                        "Botões extras".to_owned()
+                    };
+                    let options = [
+                        (Tab::Controller, "Controle"),
+                        (Tab::Extras, extras_label.as_str()),
+                    ];
+                    if let Some(tab) = segmented(ui, pal, &options, self.tab, 130.0) {
+                        self.tab = tab;
+                    }
+                });
+                ui.add_space(4.0);
+                match self.tab {
+                    Tab::Controller => {
+                        let capturing = self.capture.as_ref().map(|(s, _)| *s);
+                        match diagram::show(ui, pal, &self.live, &self.profile, capturing) {
+                            Some(Click::Map(slot)) => {
+                                self.capture = Some((slot, Capture::default()))
+                            }
+                            Some(Click::Clear(slot)) => self.clear_slot(slot),
+                            Some(Click::EditStick(stick)) => {
+                                self.stick_editor = Some(StickEditor::new(stick, &self.profile))
+                            }
+                            Some(Click::EditTouchpad) => {
+                                self.touchpad_editor = Some(TouchpadEditor::new(&self.profile))
+                            }
+                            None => {}
                         }
                     }
-                    Some(Click::EditStick(stick)) => {
-                        self.stick_editor = Some(StickEditor::new(stick, &self.profile))
-                    }
-                    None => {}
+                    Tab::Extras => match extras::show(ui, pal, &self.live, &self.profile) {
+                        Some(extras::Action::Add) => self.adding = Some(None),
+                        Some(extras::Action::Map(slot)) => {
+                            self.capture = Some((slot, Capture::default()))
+                        }
+                        Some(extras::Action::Clear(slot)) => self.clear_slot(slot),
+                        Some(extras::Action::Rename(source)) => {
+                            self.profile_dialog = Some(ProfileDialog::RenameExtra {
+                                name: Slot::Extra(source).title(&self.profile),
+                                source,
+                                error: None,
+                            })
+                        }
+                        Some(extras::Action::Remove(source)) => self.remove_extra(source),
+                        None => {}
+                    },
                 }
             });
 
         self.stick_modal(ui, pal);
+        self.touchpad_modal(ui, pal);
         self.capture_modal(ui);
         self.profile_dialog(ui, pal);
+        self.adding_dialog(ui, pal);
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {

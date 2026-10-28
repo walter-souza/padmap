@@ -153,7 +153,8 @@ pub fn summary(p: &Profile) -> String {
         + p.axes
             .values()
             .filter(|a| a.positive.is_some() || a.negative.is_some())
-            .count();
+            .count()
+        + p.extras.iter().filter(|e| e.key.is_some()).count();
     let mut parts = vec![match buttons {
         0 => "nenhum botão".to_owned(),
         1 => "1 botão".to_owned(),
@@ -175,6 +176,14 @@ pub fn summary(p: &Profile) -> String {
             }
         };
         parts.push(format!("{}: {what}", stick_short(stick)));
+    }
+    if let Some(tp) = &p.touchpad {
+        let keys: Vec<String> = tp
+            .zones
+            .iter()
+            .filter_map(|z| z.key.as_ref().map(combo_label))
+            .collect();
+        parts.push(format!("TP: {}", keys.join(" ")));
     }
     parts.join(" · ")
 }

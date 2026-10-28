@@ -4,10 +4,12 @@
 //! As teclas têm contagem de referência: se dois botões estão ligados a
 //! `Shift`, a tecla só é solta quando os dois forem soltos.
 
+use crate::extra::ExtraSource;
 use crate::gamepad::{Axis, Button, InputEvent};
 use crate::key::{Key, KeyCombo};
 use crate::profile::Profile;
 use crate::stick::{angle_of, Stick, StickMode};
+use crate::touchpad::TouchActivate;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -23,6 +25,9 @@ enum Source {
     AxisNeg(Axis),
     AxisPos(Axis),
     Sector(Stick, usize),
+    Other(u8),
+    /// Zona do touchpad acionada por um dedo: `(dedo, zona)`.
+    Zone(u8, usize),
 }
 
 /// Histerese angular, em graus: um setor só aciona com o stick essa folga para
@@ -43,6 +48,10 @@ pub struct Mapper {
     /// Frações de pixel que sobraram dos `tick`s anteriores, para o cursor
     /// andar mesmo bem devagar.
     mouse_rest: (f32, f32),
+    /// Dedos no touchpad agora e onde estão.
+    fingers: HashMap<u8, (f32, f32)>,
+    /// O touchpad está apertado.
+    touch_clicked: bool,
 }
 
 impl Mapper {
@@ -53,6 +62,8 @@ impl Mapper {
             held: HashMap::new(),
             axes: HashMap::new(),
             mouse_rest: (0.0, 0.0),
+            fingers: HashMap::new(),
+            touch_clicked: false,
         }
     }
 
@@ -114,8 +125,35 @@ impl Mapper {
     pub fn handle(&mut self, event: InputEvent) -> Vec<KeyAction> {
         let mut out = Vec::new();
         match event {
-            InputEvent::ButtonDown(b) => self.activate(Source::Button(b), &mut out),
-            InputEvent::ButtonUp(b) => self.deactivate(Source::Button(b), &mut out),
+            InputEvent::ButtonDown(b) => {
+                if b == Button::Touchpad {
+                    self.touch_click(true, &mut out);
+                }
+                self.activate(Source::Button(b), &mut out);
+            }
+            InputEvent::ButtonUp(b) => {
+                if b == Button::Touchpad {
+                    self.touch_click(false, &mut out);
+                }
+                self.deactivate(Source::Button(b), &mut out);
+            }
+            InputEvent::TouchDown(f, x, y) => {
+                self.fingers.insert(f, (x, y));
+                if self.touch_mode() == Some(TouchActivate::Touch) || self.touch_clicked {
+                    self.press_zone(f, &mut out);
+                }
+            }
+            // A zona fica a mesma até o dedo sair: deslizar pela divisa não
+            // troca a tecla no meio.
+            InputEvent::TouchMove(f, x, y) => {
+                self.fingers.insert(f, (x, y));
+            }
+            InputEvent::TouchUp(f) => {
+                self.fingers.remove(&f);
+                self.release_zones(|s| s == f, &mut out);
+            }
+            InputEvent::OtherButtonDown(n) => self.activate(Source::Other(n), &mut out),
+            InputEvent::OtherButtonUp(n) => self.deactivate(Source::Other(n), &mut out),
             InputEvent::AxisMotion(axis, value) => {
                 self.axes.insert(axis, value);
                 self.axis(axis, value, &mut out);
@@ -133,6 +171,46 @@ impl Mapper {
             self.deactivate(s, &mut out);
         }
         out
+    }
+
+    fn touch_mode(&self) -> Option<TouchActivate> {
+        Some(self.profile.touchpad.as_ref()?.activate)
+    }
+
+    /// Apertar o touchpad aciona a zona sob cada dedo; soltar solta todas.
+    fn touch_click(&mut self, down: bool, out: &mut Vec<KeyAction>) {
+        self.touch_clicked = down;
+        if self.touch_mode() != Some(TouchActivate::Click) {
+            return;
+        }
+        if down {
+            let fingers: Vec<u8> = self.fingers.keys().copied().collect();
+            for f in fingers {
+                self.press_zone(f, out);
+            }
+        } else {
+            self.release_zones(|_| true, out);
+        }
+    }
+
+    fn press_zone(&mut self, finger: u8, out: &mut Vec<KeyAction>) {
+        let (Some(tp), Some(&(x, y))) = (&self.profile.touchpad, self.fingers.get(&finger)) else {
+            return;
+        };
+        let zone = tp.zone_at(x, y);
+        self.activate(Source::Zone(finger, zone), out);
+    }
+
+    fn release_zones(&mut self, which: impl Fn(u8) -> bool, out: &mut Vec<KeyAction>) {
+        let zones: Vec<Source> = self
+            .active
+            .iter()
+            .copied()
+            .filter(|s| matches!(s, Source::Zone(f, _) if which(*f)))
+            .collect();
+        for s in zones {
+            self.deactivate(s, out);
+        }
     }
 
     fn axis(&mut self, axis: Axis, value: f32, out: &mut Vec<KeyAction>) {
@@ -206,11 +284,27 @@ impl Mapper {
 
     fn combo_for(&self, source: Source) -> Option<KeyCombo> {
         match source {
-            Source::Button(b) => self.profile.buttons.get(&b).cloned(),
+            Source::Button(b) => self
+                .profile
+                .buttons
+                .get(&b)
+                .cloned()
+                .or_else(|| self.extra_key(ExtraSource::Known(b))),
+            Source::Other(n) => self.extra_key(ExtraSource::Other(n)),
             Source::AxisNeg(a) => self.profile.axes.get(&a)?.negative.clone(),
             Source::AxisPos(a) => self.profile.axes.get(&a)?.positive.clone(),
             Source::Sector(s, i) => self.profile.sticks.get(&s)?.sectors.get(i)?.key.clone(),
+            Source::Zone(_, z) => self.profile.touchpad.as_ref()?.zones.get(z)?.key.clone(),
         }
+    }
+
+    fn extra_key(&self, source: ExtraSource) -> Option<KeyCombo> {
+        self.profile
+            .extras
+            .iter()
+            .find(|e| e.button == source)?
+            .key
+            .clone()
     }
 
     fn activate(&mut self, source: Source, out: &mut Vec<KeyAction>) {
@@ -414,6 +508,82 @@ sectors=[{start=45.0,key='Up'}]
         assert!(m.handle(InputEvent::ButtonUp(Button::South)).is_empty());
         // Desativar no meio do arrasto solta o clique.
         assert_eq!(m.release_all(), [Release(Key::MouseLeft)]);
+    }
+
+    #[test]
+    fn extra_buttons_map_like_any_button() {
+        let mut m = mapper(
+            "name='t'
+[[extras]]
+button='other_11'
+key='F'
+[[extras]]
+button='left_paddle1'
+key='G'
+[[extras]]
+button='other_12'
+",
+        );
+        assert_eq!(m.handle(InputEvent::OtherButtonDown(11)), [Press(Key::F)]);
+        assert_eq!(
+            m.handle(InputEvent::ButtonDown(Button::LeftPaddle1)),
+            [Press(Key::G)]
+        );
+        // Sem tecla, ou fora da lista: nada.
+        assert!(m.handle(InputEvent::OtherButtonDown(12)).is_empty());
+        assert!(m.handle(InputEvent::OtherButtonDown(30)).is_empty());
+        let mut released = m.release_all();
+        released.sort_by_key(|a| format!("{a:?}"));
+        assert_eq!(released, [Release(Key::F), Release(Key::G)]);
+    }
+
+    const TOUCHPAD: &str = "name='t'
+[touchpad]
+cols=2
+rows=1
+zones=[{key='Q'},{key='E'}]
+";
+
+    #[test]
+    fn touchpad_zone_fires_on_click() {
+        let mut m = mapper(TOUCHPAD);
+        // Só encostar não aciona.
+        assert!(m.handle(InputEvent::TouchDown(0, 0.8, 0.5)).is_empty());
+        assert_eq!(
+            m.handle(InputEvent::ButtonDown(Button::Touchpad)),
+            [Press(Key::E)]
+        );
+        // Deslizar para a outra zona com o touchpad apertado mantém a tecla.
+        assert!(m.handle(InputEvent::TouchMove(0, 0.2, 0.5)).is_empty());
+        assert_eq!(
+            m.handle(InputEvent::ButtonUp(Button::Touchpad)),
+            [Release(Key::E)]
+        );
+        // Encostar e apertar no mesmo instante: o clique chega antes do dedo.
+        m.handle(InputEvent::TouchUp(0));
+        assert!(m
+            .handle(InputEvent::ButtonDown(Button::Touchpad))
+            .is_empty());
+        assert_eq!(
+            m.handle(InputEvent::TouchDown(1, 0.1, 0.5)),
+            [Press(Key::Q)]
+        );
+        assert_eq!(m.release_all(), [Release(Key::Q)]);
+    }
+
+    #[test]
+    fn touchpad_zone_fires_on_touch_per_finger() {
+        let mut m = mapper(&TOUCHPAD.replace("rows=1", "rows=1\nactivate='touch'"));
+        assert_eq!(
+            m.handle(InputEvent::TouchDown(0, 0.1, 0.5)),
+            [Press(Key::Q)]
+        );
+        assert_eq!(
+            m.handle(InputEvent::TouchDown(1, 0.9, 0.5)),
+            [Press(Key::E)]
+        );
+        assert_eq!(m.handle(InputEvent::TouchUp(0)), [Release(Key::Q)]);
+        assert_eq!(m.handle(InputEvent::TouchUp(1)), [Release(Key::E)]);
     }
 
     #[test]

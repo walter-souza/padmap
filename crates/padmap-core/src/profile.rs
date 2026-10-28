@@ -1,8 +1,10 @@
 //! Perfis de mapeamento, salvos em TOML.
 
+use crate::extra::{ExtraButton, ExtraSource};
 use crate::gamepad::{Axis, Button};
 use crate::key::KeyCombo;
 use crate::stick::{Sector, Stick, StickBinding};
+use crate::touchpad::{TouchActivate, TouchpadBinding};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -62,6 +64,11 @@ pub struct Profile {
     pub axes: BTreeMap<Axis, AxisBinding>,
     #[serde(default)]
     pub sticks: BTreeMap<Stick, StickBinding>,
+    /// Botões fora do desenho principal, na ordem em que o usuário adicionou.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extras: Vec<ExtraButton>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub touchpad: Option<TouchpadBinding>,
 }
 
 impl Profile {
@@ -141,6 +148,35 @@ impl Profile {
                 return Err(ProfileError::Invalid(format!(
                     "axes.{axis}.threshold deve estar em (0, 1]"
                 )));
+            }
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for extra in &self.extras {
+            if !seen.insert(extra.button) {
+                return Err(ProfileError::Invalid(format!(
+                    "extras: {} aparece mais de uma vez",
+                    extra.button
+                )));
+            }
+            if let ExtraSource::Known(b) = extra.button {
+                if self.buttons.contains_key(&b) {
+                    return Err(ProfileError::Invalid(format!(
+                        "{b} está em buttons e em extras; deixe em um só"
+                    )));
+                }
+            }
+        }
+        if let Some(tp) = &self.touchpad {
+            tp.validate().map_err(ProfileError::Invalid)?;
+            let click_mapped = self.buttons.contains_key(&Button::Touchpad)
+                || self
+                    .extras
+                    .iter()
+                    .any(|e| e.button == ExtraSource::Known(Button::Touchpad));
+            if tp.activate == TouchActivate::Click && click_mapped {
+                return Err(ProfileError::Invalid(
+                    "o clique do touchpad aciona as zonas; tire o touchpad de buttons/extras ou use activate = \"touch\"".into(),
+                ));
             }
         }
         for (stick, binding) in &self.sticks {
@@ -233,6 +269,50 @@ sectors=[{start=0.0}]
                 .to_toml()
                 .contains("mode")
         );
+    }
+
+    #[test]
+    fn extras_round_trip_and_reject_duplicates() {
+        let text = "name = 'x'
+[[extras]]
+button = 'other_11'
+name = 'Atrás · esquerda'
+key = 'Shift'
+
+[[extras]]
+button = 'left_paddle1'
+";
+        let p = Profile::from_toml(text).unwrap();
+        assert_eq!(p.extras.len(), 2);
+        assert_eq!(p.extras[0].button, ExtraSource::Other(11));
+        assert_eq!(Profile::from_toml(&p.to_toml()).unwrap(), p);
+
+        let dup = format!("{text}\n[[extras]]\nbutton = 'other_11'\n");
+        assert!(Profile::from_toml(&dup).is_err());
+        let both = format!("{text}\n[buttons]\nleft_paddle1 = 'F'\n");
+        assert!(Profile::from_toml(&both).is_err());
+    }
+
+    #[test]
+    fn touchpad_round_trips_and_owns_the_click() {
+        let text = "name = 'x'
+[touchpad]
+cols = 2
+rows = 1
+zones = [{ key = 'Q' }, {}]
+";
+        let p = Profile::from_toml(text).unwrap();
+        let tp = p.touchpad.as_ref().unwrap();
+        assert_eq!(tp.activate, TouchActivate::Click);
+        assert_eq!(tp.zones[0].key, Some(Key::Q.into()));
+        assert_eq!(Profile::from_toml(&p.to_toml()).unwrap(), p);
+
+        let clash = format!("{text}\n[buttons]\ntouchpad = 'Tab'\n");
+        assert!(Profile::from_toml(&clash).is_err());
+        let touch = clash.replace("rows = 1", "rows = 1\nactivate = 'touch'");
+        assert!(Profile::from_toml(&touch).is_ok());
+        let short = text.replace(", {}", "");
+        assert!(Profile::from_toml(&short).is_err());
     }
 
     #[test]

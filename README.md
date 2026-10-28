@@ -27,6 +27,20 @@ cargo run --release -p padmap-gui
 - **Controle ao vivo:** o desenho acende os botões, move os sticks e enche os
   gatilhos conforme você mexe no controle. A etiqueta da tecla que está sendo
   enviada fica destacada. O controle conectado aparece no topo.
+- **Touchpad:** o touchpad do controle (DualShock 4, DualSense e outros) fica
+  entre os dois sticks. Clique nele para dividi-lo em zonas (inteiro, metades,
+  colunas, quadrantes ou uma grade de até 4 × 3) e dar uma tecla a cada uma. A
+  zona aciona ao apertar o touchpad, na zona sob o dedo, ou já ao encostar. Os
+  dedos aparecem ao vivo no editor. DS4Windows e o "PlayStation Configuration
+  Support" do Steam escondem o touchpad dos outros programas: deixe-os
+  desligados.
+- **Botões extras:** a aba "Botões extras", acima do desenho, aceita qualquer
+  outro botão do controle: traseiros, turbo, modo, botões sem nome. Clique em
+  "Adicionar botão", aperte o botão no controle, dê uma tecla e, se quiser, um
+  nome. A linha acende enquanto o botão está apertado, o que ajuda a descobrir
+  qual é qual. Se o controle transformar o botão num outro já conhecido (o de
+  trás vira "A", por exemplo), nenhum programa consegue diferenciar; o padmap
+  avisa quando o botão apertado já está no desenho.
 - **Mapear:** cada botão tem uma etiqueta ligada a ele por uma linha. Clique na
   etiqueta (ou no próprio botão do desenho), segure a tecla ou as teclas juntas
   (`Ctrl+S`, `A+B`) e solte: a combinação vale ao soltar tudo. Para um clique
@@ -128,6 +142,30 @@ threshold = 0.3
 Botões: `south east west north back guide start left_stick right_stick
 left_shoulder right_shoulder dpad_up dpad_down dpad_left dpad_right misc1
 left_paddle1 left_paddle2 right_paddle1 right_paddle2 touchpad`.
+
+Botões extras ficam em `[[extras]]`, na ordem da lista:
+
+```toml
+[[extras]]
+button = "other_11"        # botão cru do controle (contando de 0) ou um nome acima
+name = "Atrás · direita"
+key = "Space"
+```
+
+Um botão com nome não pode estar em `[buttons]` e em `[[extras]]` ao mesmo tempo.
+
+O touchpad é uma grade de zonas, lidas linha por linha, de cima para baixo:
+
+```toml
+[touchpad]
+activate = "click"         # click: ao apertar o touchpad; touch: ao encostar
+cols = 2
+rows = 1
+zones = [{ key = "Q" }, { key = "E" }]
+```
+
+Com `activate = "click"` o clique do touchpad é das zonas, então `touchpad` não
+pode estar em `[buttons]` nem em `[[extras]]`.
 
 Sticks: `left right`. Por padrão usam `left_x/left_y` e `right_x/right_y`;
 `x_axis` e `y_axis` trocam os eixos. Perfis antigos com `[axes.left_x]` e

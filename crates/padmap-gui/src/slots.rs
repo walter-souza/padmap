@@ -1,12 +1,43 @@
-//! O que pode receber uma tecla na tela principal: um botão ou um gatilho.
-//! Os sticks são mapeados por setores, no editor de stick.
+//! O que pode receber uma tecla: um botão ou gatilho da tela principal, ou um
+//! botão extra da aba "Botões extras". Os sticks são mapeados por setores, no
+//! editor de stick.
 
-use padmap_core::{Axis, Button, KeyCombo, Profile, Stick};
+use padmap_core::{Axis, Button, ExtraSource, KeyCombo, Profile, Stick};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Slot {
     Button(Button),
     Trigger(Axis),
+    /// Um botão da lista de extras; ele precisa estar em `Profile::extras`.
+    Extra(ExtraSource),
+}
+
+/// Botões com nome no SDL que o desenho do controle não mostra. Eles só
+/// podem ser mapeados como extras.
+pub const OFF_DIAGRAM: [Button; 6] = [
+    Button::Misc1,
+    Button::LeftPaddle1,
+    Button::LeftPaddle2,
+    Button::RightPaddle1,
+    Button::RightPaddle2,
+    Button::Touchpad,
+];
+
+/// Nome que um botão extra recebe ao entrar na lista.
+pub fn extra_default_name(source: ExtraSource) -> String {
+    match source {
+        ExtraSource::Known(b) => button_label(b).to_owned(),
+        // Para gente, a contagem começa em 1.
+        ExtraSource::Other(n) => format!("Botão {}", n as u16 + 1),
+    }
+}
+
+/// Origem do botão extra, para o selo da lista.
+pub fn extra_origin(source: ExtraSource) -> String {
+    match source {
+        ExtraSource::Known(_) => "botão conhecido".to_owned(),
+        ExtraSource::Other(n) => format!("botão {} do controle", n as u16 + 1),
+    }
 }
 
 impl Slot {
@@ -14,6 +45,7 @@ impl Slot {
         match self {
             Slot::Button(b) => p.buttons.get(&b),
             Slot::Trigger(a) => p.axes.get(&a)?.positive.as_ref(),
+            Slot::Extra(src) => p.extras.iter().find(|e| e.button == src)?.key.as_ref(),
         }
     }
 
@@ -34,14 +66,27 @@ impl Slot {
                     p.axes.remove(&a);
                 }
             }
+            Slot::Extra(src) => {
+                if let Some(e) = p.extras.iter_mut().find(|e| e.button == src) {
+                    e.key = combo;
+                }
+            }
         }
     }
 
-    pub fn label(self) -> &'static str {
+    /// Nome para títulos e para o log. Botões extras usam o nome dado pelo usuário.
+    pub fn title(self, p: &Profile) -> String {
         match self {
-            Slot::Button(b) => button_label(b),
-            Slot::Trigger(Axis::LeftTrigger) => "Gatilho esquerdo (LT / L2)",
-            Slot::Trigger(_) => "Gatilho direito (RT / R2)",
+            Slot::Button(b) => button_label(b).to_owned(),
+            Slot::Trigger(Axis::LeftTrigger) => "Gatilho esquerdo (LT / L2)".to_owned(),
+            Slot::Trigger(_) => "Gatilho direito (RT / R2)".to_owned(),
+            Slot::Extra(src) => p
+                .extras
+                .iter()
+                .find(|e| e.button == src)
+                .map(|e| e.name.clone())
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| extra_default_name(src)),
         }
     }
 }

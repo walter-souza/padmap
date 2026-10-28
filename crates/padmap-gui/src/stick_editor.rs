@@ -5,7 +5,7 @@
 //!
 //! Tudo é editado numa cópia; o perfil só muda em "Salvar Mapeamento".
 
-use crate::app::switch;
+use crate::app::{segmented, switch};
 use crate::capture::{combo_label, keys_ui, mouse_buttons_ui, Capture, ModalAction};
 use crate::diagram::{polar, wedge, Live};
 use crate::slots::stick_title;
@@ -344,45 +344,13 @@ impl StickEditor {
 
     /// Faixa de título. Retorna `true` se o × foi clicado.
     fn header(&mut self, ui: &mut Ui, pal: &Palette) -> bool {
-        let mut close = false;
-        let frame = egui::Frame::new()
-            .fill(pal.chrome)
-            .corner_radius(CornerRadius {
-                nw: 14,
-                ne: 14,
-                sw: 0,
-                se: 0,
-            })
-            .inner_margin(Margin::symmetric(PAD, 14))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!("Mapeamento do Stick · {}", stick_title(self.stick)))
-                            .size(16.0)
-                            .strong()
-                            .color(pal.text),
-                    );
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let x = egui::Button::new(
-                            RichText::new("×").size(18.0).color(pal.chrome_muted),
-                        )
-                        .frame(false);
-                        if ui.add(x).on_hover_text("Fechar sem salvar").clicked() {
-                            close = true;
-                        }
-                        ui.add_space(8.0);
-                        if let Some(mode) = mode_toggle(ui, pal, self.draft.mode) {
-                            self.set_mode(mode);
-                        }
-                    });
-                });
-            });
-        // Mesma linha que separa o cabeçalho da tela principal.
-        let r = frame.response.rect;
-        ui.painter()
-            .hline(r.x_range(), r.bottom(), Stroke::new(1.0, pal.chrome_border));
-        close
+        let title = format!("Mapeamento do Stick · {}", stick_title(self.stick));
+        modal_header(ui, pal, &title, |ui| {
+            let options = [(StickMode::Sectors, "Teclas"), (StickMode::Mouse, "Mouse")];
+            if let Some(mode) = segmented(ui, pal, &options, self.draft.mode, 78.0) {
+                self.set_mode(mode);
+            }
+        })
     }
 
     fn axes_card(&mut self, ui: &mut Ui, pal: &Palette) {
@@ -418,7 +386,6 @@ impl StickEditor {
             }
         });
     }
-
     fn dial_card(&mut self, ui: &mut Ui, pal: &Palette, live: &Live) {
         card(ui, pal, |ui| {
             let (rect, resp) =
@@ -426,7 +393,8 @@ impl StickEditor {
             self.dial(ui, pal, live, rect, &resp);
             if let Some((i, capture)) = &self.capture {
                 let (i, held) = (*i, capture.keys().to_vec());
-                match capture_overlay(ui, pal, rect, i, &held) {
+                match capture_overlay(ui, pal, rect, &format!("Mapeando Região {}", i + 1), &held)
+                {
                     Some(ModalAction::Pick(combo)) => {
                         self.draft.sectors[i].key = Some(combo);
                         self.capture = None;
@@ -907,6 +875,20 @@ impl StickEditor {
     }
 
     fn footer(&self, ui: &mut Ui, pal: &Palette) -> Option<Outcome> {
+        modal_footer(ui, pal, self.capture.is_none()).map(|save| {
+            if save {
+                Outcome::Save(self.finish())
+            } else {
+                Outcome::Cancel
+            }
+        })
+    }
+}
+
+/// Rodapé dos editores: "Cancelar" e "Salvar Mapeamento". Retorna `Some(true)`
+/// ao salvar e `Some(false)` ao cancelar.
+pub(crate) fn modal_footer(ui: &mut Ui, pal: &Palette, can_save: bool) -> Option<bool> {
+    {
         let mut outcome = None;
         let top = ui.cursor().top();
         ui.painter().hline(
@@ -935,15 +917,14 @@ impl StickEditor {
                     .stroke(Stroke::NONE)
                     .corner_radius(9)
                     .min_size(vec2(0.0, 38.0));
-                    let busy = self.capture.is_some();
-                    if ui.add_enabled(!busy, save).clicked() {
-                        outcome = Some(Outcome::Save(self.finish()));
+                    if ui.add_enabled(can_save, save).clicked() {
+                        outcome = Some(true);
                     }
                     let cancel = egui::Button::new(RichText::new("Cancelar").color(pal.free_text))
                         .frame(false)
                         .min_size(vec2(0.0, 38.0));
                     if ui.add(cancel).clicked() {
-                        outcome = Some(Outcome::Cancel);
+                        outcome = Some(false);
                     }
                 });
             });
@@ -952,6 +933,47 @@ impl StickEditor {
 }
 
 // -------------------------------------------------------------------- peças
+
+/// Cabeçalho dos editores: título, `right` (à esquerda do ×) e o × que fecha
+/// sem salvar. Retorna se o × foi clicado.
+pub(crate) fn modal_header(
+    ui: &mut Ui,
+    pal: &Palette,
+    title: &str,
+    right: impl FnOnce(&mut Ui),
+) -> bool {
+    let mut close = false;
+    let frame = egui::Frame::new()
+        .fill(pal.chrome)
+        .corner_radius(CornerRadius {
+            nw: 14,
+            ne: 14,
+            sw: 0,
+            se: 0,
+        })
+        .inner_margin(Margin::symmetric(PAD, 14))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(title).size(16.0).strong().color(pal.text));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let x =
+                        egui::Button::new(RichText::new("×").size(18.0).color(pal.chrome_muted))
+                            .frame(false);
+                    if ui.add(x).on_hover_text("Fechar sem salvar").clicked() {
+                        close = true;
+                    }
+                    ui.add_space(8.0);
+                    right(ui);
+                });
+            });
+        });
+    // Mesma linha que separa o cabeçalho da tela principal.
+    let r = frame.response.rect;
+    ui.painter()
+        .hline(r.x_range(), r.bottom(), Stroke::new(1.0, pal.chrome_border));
+    close
+}
 
 /// Ângulo do ponto `p` em volta de `c`, na mesma convenção dos setores.
 fn angle_at(c: Pos2, p: Pos2) -> f32 {
@@ -970,14 +992,14 @@ fn channel(axis: Axis) -> u8 {
     }
 }
 
-fn heading(pal: &Palette, text: &str) -> RichText {
+pub(crate) fn heading(pal: &Palette, text: &str) -> RichText {
     RichText::new(text)
         .size(11.0)
         .strong()
         .color(pal.text_muted)
 }
 
-fn card<R>(ui: &mut Ui, pal: &Palette, add: impl FnOnce(&mut Ui) -> R) -> R {
+pub(crate) fn card<R>(ui: &mut Ui, pal: &Palette, add: impl FnOnce(&mut Ui) -> R) -> R {
     egui::Frame::new()
         .fill(pal.bar)
         .stroke(Stroke::new(1.0, pal.bar_border))
@@ -1036,50 +1058,8 @@ fn axis_field(ui: &mut Ui, pal: &Palette, label: &str, axis: Axis, picking: bool
     resp.on_hover_text(format!("{axis}. Clique e mova o stick para trocar o eixo."))
 }
 
-/// Seletor Teclas | Mouse. Retorna o modo escolhido quando muda.
-fn mode_toggle(ui: &mut Ui, pal: &Palette, current: StickMode) -> Option<StickMode> {
-    let options = [(StickMode::Sectors, "Teclas"), (StickMode::Mouse, "Mouse")];
-    let cell = vec2(78.0, 24.0);
-    let (rect, _) = ui.allocate_exact_size(
-        vec2(cell.x * options.len() as f32 + 6.0, cell.y + 6.0),
-        Sense::hover(),
-    );
-    ui.painter().rect_filled(rect, 8.0, pal.toggle_bg);
-    let mut chosen = None;
-    for (i, (mode, label)) in options.into_iter().enumerate() {
-        let r = Rect::from_min_size(rect.min + vec2(3.0 + cell.x * i as f32, 3.0), cell);
-        let resp = ui.interact(r, ui.scope_id().with(("mode", i)), Sense::click());
-        let selected = mode == current;
-        if selected {
-            ui.painter().rect(
-                r,
-                6.0,
-                pal.toggle_on,
-                Stroke::new(1.0, pal.button_border),
-                StrokeKind::Inside,
-            );
-        }
-        let color = if selected || resp.hovered() {
-            pal.text
-        } else {
-            pal.text_muted
-        };
-        ui.painter().text(
-            r.center(),
-            Align2::CENTER_CENTER,
-            label,
-            FontId::proportional(12.5),
-            color,
-        );
-        if resp.clicked() && !selected {
-            chosen = Some(mode);
-        }
-    }
-    chosen
-}
-
 /// Título de seção com o valor num selo à direita.
-fn title_row(ui: &mut Ui, pal: &Palette, title: &str, value: &str) {
+pub(crate) fn title_row(ui: &mut Ui, pal: &Palette, title: &str, value: &str) {
     ui.horizontal(|ui| {
         ui.label(heading(pal, title));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1168,7 +1148,13 @@ fn cursor_icon(painter: &egui::Painter, tip: Pos2, pal: &Palette) {
 }
 
 /// Linha da lista de presets. `clickable: false` só mostra o estado.
-fn list_row(ui: &mut Ui, pal: &Palette, text: &str, selected: bool, clickable: bool) -> Response {
+pub(crate) fn list_row(
+    ui: &mut Ui,
+    pal: &Palette,
+    text: &str,
+    selected: bool,
+    clickable: bool,
+) -> Response {
     let sense = if clickable {
         Sense::click()
     } else {
@@ -1199,13 +1185,13 @@ fn list_row(ui: &mut Ui, pal: &Palette, text: &str, selected: bool, clickable: b
     resp
 }
 
-/// Cobre o círculo enquanto a tecla de um setor é capturada. Retorna
+/// Cobre `rect` enquanto a tecla de uma região é capturada. Retorna
 /// `Cancel` se a captura foi cancelada ou `Pick` se um clique foi escolhido.
-fn capture_overlay(
+pub(crate) fn capture_overlay(
     ui: &mut Ui,
     pal: &Palette,
     rect: Rect,
-    sector: usize,
+    title: &str,
     held: &[Key],
 ) -> Option<ModalAction> {
     ui.painter()
@@ -1217,12 +1203,7 @@ fn capture_overlay(
             .layout(Layout::top_down(Align::Center)),
         |ui| {
             ui.add_space(4.0);
-            ui.label(
-                RichText::new(format!("Mapeando Região {}", sector + 1))
-                    .size(16.0)
-                    .strong()
-                    .color(pal.text),
-            );
+            ui.label(RichText::new(title).size(16.0).strong().color(pal.text));
             ui.add_space(8.0);
             keys_ui(ui, pal, held);
             ui.add_space(10.0);

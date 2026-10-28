@@ -11,7 +11,9 @@ use eframe::egui::{
     self, vec2, Align2, Color32, FontId, Galley, Pos2, Rect, Response, Sense, Shape, Stroke,
     StrokeKind, Ui, Vec2,
 };
-use padmap_core::{Axis, Button, Profile, Stick, StickMode};
+use padmap_core::{
+    Axis, Button, ExtraSource, Profile, Stick, StickMode, TouchActivate, TouchpadBinding,
+};
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::TAU;
 use std::sync::Arc;
@@ -19,7 +21,11 @@ use std::sync::Arc;
 #[derive(Default)]
 pub struct Live {
     pub pressed: HashSet<Button>,
+    /// Botões crus do joystick apertados agora (os que não têm nome).
+    pub pressed_other: HashSet<u8>,
     pub axes: HashMap<Axis, f32>,
+    /// Dedos no touchpad agora, com a posição de cada um em `0..=1`.
+    pub touch: HashMap<u8, (f32, f32)>,
 }
 
 impl Live {
@@ -27,10 +33,28 @@ impl Live {
         self.axes.get(&a).copied().unwrap_or(0.0)
     }
 
+    /// Zonas do touchpad acionadas agora: a zona sob cada dedo, se o modo de
+    /// acionar está valendo (dedo encostado, ou o touchpad apertado).
+    pub fn touch_zones(&self, tp: &TouchpadBinding) -> Vec<usize> {
+        if tp.activate == TouchActivate::Click && !self.pressed.contains(&Button::Touchpad) {
+            return Vec::new();
+        }
+        let mut zones: Vec<usize> = self
+            .touch
+            .values()
+            .map(|&(x, y)| tp.zone_at(x, y))
+            .collect();
+        zones.sort_unstable();
+        zones.dedup();
+        zones
+    }
+
     pub fn is_active(&self, slot: Slot, profile: &Profile) -> bool {
         match slot {
             Slot::Button(b) => self.pressed.contains(&b),
             Slot::Trigger(a) => self.axis(a) >= threshold(profile, a),
+            Slot::Extra(ExtraSource::Known(b)) => self.pressed.contains(&b),
+            Slot::Extra(ExtraSource::Other(n)) => self.pressed_other.contains(&n),
         }
     }
 
@@ -119,6 +143,7 @@ pub enum Click {
     /// Deixar o botão livre (botão direito do mouse).
     Clear(Slot),
     EditStick(Stick),
+    EditTouchpad,
 }
 
 const WIDTH: f32 = 1000.0;
@@ -944,6 +969,147 @@ impl Stage<'_> {
     }
 }
 
+impl Stage<'_> {
+    /// Touchpad entre os dois sticks: as zonas do perfil, os dedos ao vivo e
+    /// as teclas acionadas agora no selo de cima.
+    fn touchpad_panel(&mut self, cx: f32) {
+        let pal = self.pal;
+        let s = self.s;
+        let tp = self.profile.touchpad.as_ref();
+        let zones = tp.map(|tp| self.live.touch_zones(tp)).unwrap_or_default();
+        let active: Vec<String> = zones
+            .iter()
+            .filter_map(|&i| tp?.zones[i].key.as_ref())
+            .map(|c| combo_label(c).to_uppercase())
+            .collect();
+        let (badge, bg, border, color) = if !active.is_empty() {
+            (active.join(" + "), pal.active_bg, ACTIVE, pal.text)
+        } else if tp.is_some() {
+            (
+                "INATIVO".to_owned(),
+                pal.chip_bg,
+                pal.chip_border,
+                pal.chip_text,
+            )
+        } else {
+            (
+                "LIVRE".to_owned(),
+                pal.chip_bg,
+                pal.chip_border,
+                pal.chip_text,
+            )
+        };
+        let g = self.text(&badge, 10.0, color);
+        let rect =
+            Rect::from_center_size(self.at(cx, 409.0), vec2(g.size().x + 16.0 * s, 22.0 * s));
+        self.painter.rect(
+            rect,
+            5.0 * s,
+            bg,
+            self.stroke(1.5, border),
+            StrokeKind::Inside,
+        );
+        self.painter
+            .galley(rect.center() - g.size() / 2.0, g, color);
+
+        // O touchpad, no mesmo estilo do círculo dos sticks.
+        let pad = Rect::from_center_size(self.at(cx, 500.0), vec2(104.0, 58.0) * s);
+        let clicked = self.pressed(Button::Touchpad);
+        if !active.is_empty() || clicked {
+            self.painter.rect_stroke(
+                pad.expand(5.0 * s),
+                14.0 * s,
+                self.stroke(3.0, ACTIVE.gamma_multiply(0.35)),
+                StrokeKind::Inside,
+            );
+        }
+        self.painter.rect(
+            pad,
+            11.0 * s,
+            pal.stick_bg,
+            self.stroke(3.0, pal.stick_ring),
+            StrokeKind::Inside,
+        );
+        if let Some(tp) = tp {
+            let (cols, rows) = (tp.cols as usize, tp.rows as usize);
+            let cell = vec2(pad.width() / cols as f32, pad.height() / rows as f32);
+            for &i in &zones {
+                let min = pad.min + vec2((i % cols) as f32 * cell.x, (i / cols) as f32 * cell.y);
+                self.painter.rect_filled(
+                    Rect::from_min_size(min, cell).shrink(3.0 * s),
+                    5.0 * s,
+                    Color32::from_rgba_unmultiplied(0xEA, 0xB3, 0x08, 115),
+                );
+            }
+            for c in 1..cols {
+                let x = pad.left() + c as f32 * cell.x;
+                self.painter.line_segment(
+                    [
+                        Pos2::new(x, pad.top() + 4.0 * s),
+                        Pos2::new(x, pad.bottom() - 4.0 * s),
+                    ],
+                    self.stroke(1.4, pal.stick_spoke),
+                );
+            }
+            for r in 1..rows {
+                let y = pad.top() + r as f32 * cell.y;
+                self.painter.line_segment(
+                    [
+                        Pos2::new(pad.left() + 4.0 * s, y),
+                        Pos2::new(pad.right() - 4.0 * s, y),
+                    ],
+                    self.stroke(1.4, pal.stick_spoke),
+                );
+            }
+        }
+        for &(x, y) in self.live.touch.values() {
+            let p = pad.min + vec2(x * pad.width(), y * pad.height());
+            let fill = if active.is_empty() { KNOB_IDLE } else { ACTIVE };
+            self.painter
+                .circle(p, 5.0 * s, fill, self.stroke(2.0, pal.stick_bg));
+        }
+
+        let resp = self
+            .interact(pad.expand(10.0 * s), "touchpad")
+            .on_hover_text("Touchpad: clique para editar as zonas");
+        if resp.hovered() {
+            self.painter.rect_stroke(
+                pad.expand(4.0 * s),
+                14.0 * s,
+                self.stroke(1.5, ACCENT),
+                StrokeKind::Outside,
+            );
+        }
+        if resp.clicked() {
+            self.clicked = Some(Click::EditTouchpad);
+        }
+
+        let g = self.text("TP", 11.0, Color32::WHITE);
+        let rect =
+            Rect::from_center_size(self.at(cx, 593.0), vec2(g.size().x + 24.0 * s, 26.0 * s));
+        let resp = self.interact(rect, ("button", "touchpad"));
+        let bg = if resp.hovered() {
+            ACCENT_STRONG
+        } else {
+            ACCENT
+        };
+        self.painter
+            .rect(rect, 6.0 * s, bg, Stroke::NONE, StrokeKind::Inside);
+        self.painter
+            .galley(rect.center() - g.size() / 2.0, g, Color32::WHITE);
+        if resp.clicked() {
+            self.clicked = Some(Click::EditTouchpad);
+        }
+        self.painter.text(
+            self.at(cx, 623.0),
+            Align2::CENTER_CENTER,
+            "TOUCHPAD",
+            self.font(10.0),
+            pal.text_muted,
+        );
+    }
+}
+
 /// Desenha a tela e retorna o que foi clicado, se algo foi.
 pub fn show(
     ui: &mut Ui,
@@ -980,6 +1146,7 @@ pub fn show(
     }
     st.stick_panel(Stick::Left, 370.0);
     st.stick_panel(Stick::Right, 630.0);
+    st.touchpad_panel(500.0);
     st.clicked
 }
 

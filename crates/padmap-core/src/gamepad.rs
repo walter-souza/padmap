@@ -141,4 +141,13 @@ pub enum InputEvent {
     ButtonDown(Button),
     ButtonUp(Button),
     AxisMotion(Axis, f32),
+    /// Botão `n` do joystick (contando de 0) que o mapeamento do controle não
+    /// cobre, e por isso não tem nome.
+    OtherButtonDown(u8),
+    OtherButtonUp(u8),
+    /// Dedo encostou no touchpad: `(dedo, x, y)`, com x e y em `0..=1` a
+    /// partir do canto de cima à esquerda.
+    TouchDown(u8, f32, f32),
+    TouchMove(u8, f32, f32),
+    TouchUp(u8),
 }
