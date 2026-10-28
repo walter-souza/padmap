@@ -828,9 +828,14 @@ impl Stage<'_> {
         // Círculo com os setores do perfil. 44 → 61.6 px: mesma escala do protótipo (100 → 140).
         let c = self.at(cx, 500.0);
         let reach = 61.6 * s;
-        let ring = if engaged { ACTIVE } else { pal.stick_ring };
+        // O círculo não muda de tamanho nem de borda: acionado, ganha só um
+        // halo fino por fora.
+        if engaged {
+            self.painter
+                .circle_stroke(c, 69.5 * s, self.stroke(3.0, ACTIVE.gamma_multiply(0.35)));
+        }
         self.painter
-            .circle(c, 64.4 * s, pal.stick_bg, self.stroke(3.5, ring));
+            .circle(c, 64.4 * s, pal.stick_bg, self.stroke(3.5, pal.stick_ring));
 
         let (x, y) = (self.live.axis(ax), self.live.axis(ay));
         if let Some((force, dir)) = mouse {
@@ -886,12 +891,8 @@ impl Stage<'_> {
             knob = knob.normalized() * reach;
         }
         let knob_fill = if engaged { ACTIVE } else { KNOB_IDLE };
-        self.painter.circle(
-            c + knob,
-            (if engaged { 8.4 } else { 7.0 }) * s,
-            knob_fill,
-            self.stroke(2.8, pal.stick_bg),
-        );
+        self.painter
+            .circle(c + knob, 7.0 * s, knob_fill, self.stroke(2.8, pal.stick_bg));
 
         let resp = self
             .interact(
@@ -916,31 +917,18 @@ impl Stage<'_> {
         }
 
         // Botão LS / RS e a legenda.
-        let g = self.text(
-            stick_short(stick),
-            11.0,
-            if engaged { pal.text } else { Color32::WHITE },
-        );
+        let g = self.text(stick_short(stick), 11.0, Color32::WHITE);
         let rect =
             Rect::from_center_size(self.at(cx, 593.0), vec2(g.size().x + 24.0 * s, 26.0 * s));
         let resp = self.interact(rect, ("button", stick));
-        let (bg, border) = if engaged {
-            (pal.active_bg, ACTIVE)
-        } else {
-            (ACCENT, ACCENT)
-        };
-        let bg = if resp.hovered() && !engaged {
+        // Sempre azul: o estado já aparece no selo de cima e no círculo.
+        let bg = if resp.hovered() {
             ACCENT_STRONG
         } else {
-            bg
+            ACCENT
         };
-        self.painter.rect(
-            rect,
-            6.0 * s,
-            bg,
-            self.stroke(1.5, border),
-            StrokeKind::Inside,
-        );
+        self.painter
+            .rect(rect, 6.0 * s, bg, Stroke::NONE, StrokeKind::Inside);
         self.painter
             .galley(rect.center() - g.size() / 2.0, g, Color32::WHITE);
         if resp.clicked() {
