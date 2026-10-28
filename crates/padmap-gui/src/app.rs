@@ -9,7 +9,7 @@ use crate::touchpad_editor::{self, TouchpadEditor};
 use crate::worker::{Command, Status, Worker};
 use eframe::egui::{self, vec2, Color32, Margin, Rect, RichText, Sense, Stroke, StrokeKind, Theme};
 use padmap_core::{
-    Button, ExtraButton, ExtraSource, InputEvent, Key, KeyAction, KeyCombo, Profile, TouchActivate,
+    Button, ExtraButton, ExtraSource, InputEvent, Key, KeyAction, KeyCombo, Profile,
 };
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -125,7 +125,8 @@ impl PadmapApp {
 
     fn profile_changed(&mut self) {
         self.dirty = true;
-        self.worker.send(Command::SetProfile(self.profile.clone()));
+        self.worker
+            .send(Command::SetProfile(Box::new(self.profile.clone())));
         if self.autosave && self.path.is_some() {
             self.save();
         }
@@ -169,7 +170,8 @@ impl PadmapApp {
         self.profile = profile;
         self.path = path;
         self.dirty = false;
-        self.worker.send(Command::SetProfile(self.profile.clone()));
+        self.worker
+            .send(Command::SetProfile(Box::new(self.profile.clone())));
     }
 
     fn push_log(&mut self, line: String) {
@@ -216,11 +218,16 @@ impl PadmapApp {
                         InputEvent::OtherButtonUp(n) => {
                             self.live.pressed_other.remove(&n);
                         }
-                        InputEvent::TouchDown(f, x, y) | InputEvent::TouchMove(f, x, y) => {
+                        InputEvent::TouchDown(f, x, y) => {
+                            self.live.touch.insert(f, (x, y));
+                            self.live.touch_start.insert(f, (x, y));
+                        }
+                        InputEvent::TouchMove(f, x, y) => {
                             self.live.touch.insert(f, (x, y));
                         }
                         InputEvent::TouchUp(f) => {
                             self.live.touch.remove(&f);
+                            self.live.touch_start.remove(&f);
                         }
                     }
                     if self.adding.is_some() {
@@ -780,14 +787,14 @@ impl PadmapApp {
                     )));
                     return;
                 }
-                let zones_own_click = self
+                let touchpad_owns_click = self
                     .profile
                     .touchpad
                     .as_ref()
-                    .is_some_and(|tp| tp.activate == TouchActivate::Click);
-                if b == Button::Touchpad && zones_own_click {
+                    .is_some_and(|tp| tp.owns_click());
+                if b == Button::Touchpad && touchpad_owns_click {
                     self.adding = Some(Some(
-                        "O clique do touchpad aciona as zonas do touchpad. Para dar uma tecla só ao clique, mude o touchpad para \u{201c}Ao tocar\u{201d}.".to_owned(),
+                        "O clique do touchpad já é usado pelo touchpad (zonas ao clicar ou mouse). Para dar uma tecla só ao clique, use as zonas \u{201c}Ao tocar\u{201d} ou os gestos.".to_owned(),
                     ));
                     return;
                 }
@@ -1082,11 +1089,8 @@ impl PadmapApp {
         };
         match editor.show(ui.ctx(), pal, &self.live) {
             Some(touchpad_editor::Outcome::Save(binding)) => {
-                // No modo "ao clicar" o clique do touchpad é das zonas.
-                if binding
-                    .as_ref()
-                    .is_some_and(|b| b.activate == TouchActivate::Click)
-                {
+                // Nas zonas "ao clicar" e no mouse, o clique é do touchpad.
+                if binding.as_ref().is_some_and(|b| b.owns_click()) {
                     self.profile.buttons.remove(&Button::Touchpad);
                     self.profile
                         .extras

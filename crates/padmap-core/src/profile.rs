@@ -4,7 +4,7 @@ use crate::extra::{ExtraButton, ExtraSource};
 use crate::gamepad::{Axis, Button};
 use crate::key::KeyCombo;
 use crate::stick::{Sector, Stick, StickBinding};
-use crate::touchpad::{TouchActivate, TouchpadBinding};
+use crate::touchpad::TouchpadBinding;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -173,9 +173,9 @@ impl Profile {
                     .extras
                     .iter()
                     .any(|e| e.button == ExtraSource::Known(Button::Touchpad));
-            if tp.activate == TouchActivate::Click && click_mapped {
+            if tp.owns_click() && click_mapped {
                 return Err(ProfileError::Invalid(
-                    "o clique do touchpad aciona as zonas; tire o touchpad de buttons/extras ou use activate = \"touch\"".into(),
+                    "o clique do touchpad já é do touchpad (zonas ao clicar ou mouse); tire o touchpad de buttons/extras".into(),
                 ));
             }
         }
@@ -303,7 +303,7 @@ zones = [{ key = 'Q' }, {}]
 ";
         let p = Profile::from_toml(text).unwrap();
         let tp = p.touchpad.as_ref().unwrap();
-        assert_eq!(tp.activate, TouchActivate::Click);
+        assert_eq!(tp.activate, crate::touchpad::TouchActivate::Click);
         assert_eq!(tp.zones[0].key, Some(Key::Q.into()));
         assert_eq!(Profile::from_toml(&p.to_toml()).unwrap(), p);
 
@@ -313,6 +313,27 @@ zones = [{ key = 'Q' }, {}]
         assert!(Profile::from_toml(&touch).is_ok());
         let short = text.replace(", {}", "");
         assert!(Profile::from_toml(&short).is_err());
+    }
+
+    #[test]
+    fn touchpad_modes_round_trip() {
+        let text = "name = 'x'
+[touchpad]
+mode = 'swipe'
+swipe = { distance = 0.3, up = 'M', left = 'Q' }
+[buttons]
+touchpad = 'Tab'
+";
+        let p = Profile::from_toml(text).unwrap();
+        let tp = p.touchpad.as_ref().unwrap();
+        assert_eq!(tp.zones.len(), 2);
+        assert_eq!(tp.swipe.up, Some(Key::M.into()));
+        assert_eq!(Profile::from_toml(&p.to_toml()).unwrap(), p);
+        // No mouse o clique é do touchpad.
+        assert!(Profile::from_toml(&text.replace("'swipe'", "'mouse'")).is_err());
+        let mouse = Profile::from_toml("name='x'\n[touchpad]\nmode='mouse'\n").unwrap();
+        let m = &mouse.touchpad.unwrap().mouse;
+        assert_eq!(m.click, Some(Key::MouseLeft.into()));
     }
 
     #[test]

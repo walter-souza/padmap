@@ -28,10 +28,17 @@ cargo run --release -p padmap-gui
   gatilhos conforme você mexe no controle. A etiqueta da tecla que está sendo
   enviada fica destacada. O controle conectado aparece no topo.
 - **Touchpad:** o touchpad do controle (DualShock 4, DualSense e outros) fica
-  entre os dois sticks. Clique nele para dividi-lo em zonas (inteiro, metades,
-  colunas, quadrantes ou uma grade de até 4 × 3) e dar uma tecla a cada uma. A
-  zona aciona ao apertar o touchpad, na zona sob o dedo, ou já ao encostar. Os
-  dedos aparecem ao vivo no editor. DS4Windows e o "PlayStation Configuration
+  entre os dois sticks. Clique nele para escolher um modo:
+  - **Zonas:** o touchpad dividido em zonas (inteiro, metades, colunas,
+    quadrantes ou uma grade de até 4 × 3), cada uma com uma tecla. A zona
+    aciona ao apertar o touchpad, na zona sob o dedo, ou já ao encostar.
+  - **Mouse:** deslizar o dedo move o cursor, como no notebook. Apertar o
+    touchpad clica (com dois dedos, o outro clique); as duas teclas podem ser
+    trocadas.
+  - **Gestos:** deslizar para cima, baixo, esquerda ou direita aperta a tecla
+    da direção, que fica apertada até o dedo sair.
+
+  Os dedos aparecem ao vivo no editor. DS4Windows e o "PlayStation Configuration
   Support" do Steam escondem o touchpad dos outros programas: deixe-os
   desligados.
 - **Botões extras:** a aba "Botões extras", acima do desenho, aceita qualquer
@@ -158,14 +165,20 @@ O touchpad é uma grade de zonas, lidas linha por linha, de cima para baixo:
 
 ```toml
 [touchpad]
+mode = "zones"             # zones (padrão), mouse ou swipe
 activate = "click"         # click: ao apertar o touchpad; touch: ao encostar
 cols = 2
 rows = 1
 zones = [{ key = "Q" }, { key = "E" }]
+mouse = { speed = 1500.0, click = "MouseLeft", two_finger_click = "MouseRight" }
+swipe = { distance = 0.25, up = "M", left = "Q", right = "E" }
 ```
 
-Com `activate = "click"` o clique do touchpad é das zonas, então `touchpad` não
-pode estar em `[buttons]` nem em `[[extras]]`.
+`speed` é quanto o cursor anda, em pixels, com o dedo de um lado ao outro;
+`distance` é quanto o dedo anda num gesto, em parte da largura. A configuração
+dos outros modos fica guardada. Nas zonas com `activate = "click"` e no modo
+mouse o clique do touchpad é do touchpad, então `touchpad` não pode estar em
+`[buttons]` nem em `[[extras]]`.
 
 Sticks: `left right`. Por padrão usam `left_x/left_y` e `right_x/right_y`;
 `x_axis` e `y_axis` trocam os eixos. Perfis antigos com `[axes.left_x]` e

@@ -17,7 +17,7 @@ const IDLE_WAIT: Duration = Duration::from_millis(10);
 const MOUSE_WAIT: Duration = Duration::from_millis(4);
 
 pub enum Command {
-    SetProfile(Profile),
+    SetProfile(Box<Profile>),
     SetActive(bool),
     SetDryRun(bool),
     Quit,
@@ -154,7 +154,7 @@ fn run(profile: Profile, commands: Receiver<Command>, status: Sender<Status>, re
         loop {
             match commands.try_recv() {
                 Ok(Command::SetProfile(p)) => {
-                    let released = st.mapper.set_profile(p);
+                    let released = st.mapper.set_profile(*p);
                     st.emit(released);
                 }
                 Ok(Command::SetActive(on)) => {

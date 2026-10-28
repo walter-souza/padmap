@@ -12,7 +12,8 @@ use eframe::egui::{
     StrokeKind, Ui, Vec2,
 };
 use padmap_core::{
-    Axis, Button, ExtraSource, Profile, Stick, StickMode, TouchActivate, TouchpadBinding,
+    Axis, Button, ExtraSource, Profile, Stick, StickMode, Swipe, TouchActivate, TouchMode,
+    TouchpadBinding,
 };
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::TAU;
@@ -26,6 +27,8 @@ pub struct Live {
     pub axes: HashMap<Axis, f32>,
     /// Dedos no touchpad agora, com a posição de cada um em `0..=1`.
     pub touch: HashMap<u8, (f32, f32)>,
+    /// Onde cada dedo encostou, para mostrar os gestos.
+    pub touch_start: HashMap<u8, (f32, f32)>,
 }
 
 impl Live {
@@ -36,7 +39,9 @@ impl Live {
     /// Zonas do touchpad acionadas agora: a zona sob cada dedo, se o modo de
     /// acionar está valendo (dedo encostado, ou o touchpad apertado).
     pub fn touch_zones(&self, tp: &TouchpadBinding) -> Vec<usize> {
-        if tp.activate == TouchActivate::Click && !self.pressed.contains(&Button::Touchpad) {
+        if tp.mode != TouchMode::Zones
+            || tp.activate == TouchActivate::Click && !self.pressed.contains(&Button::Touchpad)
+        {
             return Vec::new();
         }
         let mut zones: Vec<usize> = self
@@ -47,6 +52,17 @@ impl Live {
         zones.sort_unstable();
         zones.dedup();
         zones
+    }
+
+    /// Gestos que os dedos encostados já fizeram, no modo gestos.
+    pub fn touch_swipes(&self, tp: &TouchpadBinding) -> Vec<Swipe> {
+        if tp.mode != TouchMode::Swipe {
+            return Vec::new();
+        }
+        self.touch
+            .iter()
+            .filter_map(|(f, &now)| tp.swipe.direction(*self.touch_start.get(f)?, now))
+            .collect()
     }
 
     pub fn is_active(&self, slot: Slot, profile: &Profile) -> bool {
@@ -977,12 +993,19 @@ impl Stage<'_> {
         let s = self.s;
         let tp = self.profile.touchpad.as_ref();
         let zones = tp.map(|tp| self.live.touch_zones(tp)).unwrap_or_default();
+        let swipes = tp.map(|tp| self.live.touch_swipes(tp)).unwrap_or_default();
+        let mouse = tp.is_some_and(|tp| tp.mode == TouchMode::Mouse);
         let active: Vec<String> = zones
             .iter()
             .filter_map(|&i| tp?.zones[i].key.as_ref())
+            .chain(swipes.iter().filter_map(|&d| tp?.swipe.key(d)))
             .map(|c| combo_label(c).to_uppercase())
             .collect();
-        let (badge, bg, border, color) = if !active.is_empty() {
+        let (badge, bg, border, color) = if mouse && !self.live.touch.is_empty() {
+            ("MOUSE".to_owned(), pal.active_bg, ACTIVE, pal.text)
+        } else if mouse {
+            ("MOUSE".to_owned(), pal.key_bg, pal.key_bg, pal.key_text)
+        } else if !active.is_empty() {
             (active.join(" + "), pal.active_bg, ACTIVE, pal.text)
         } else if tp.is_some() {
             (
@@ -1015,7 +1038,8 @@ impl Stage<'_> {
         // O touchpad, no mesmo estilo do círculo dos sticks.
         let pad = Rect::from_center_size(self.at(cx, 500.0), vec2(104.0, 58.0) * s);
         let clicked = self.pressed(Button::Touchpad);
-        if !active.is_empty() || clicked {
+        let engaged = !active.is_empty() || mouse && !self.live.touch.is_empty();
+        if engaged || clicked {
             self.painter.rect_stroke(
                 pad.expand(5.0 * s),
                 14.0 * s,
@@ -1030,7 +1054,7 @@ impl Stage<'_> {
             self.stroke(3.0, pal.stick_ring),
             StrokeKind::Inside,
         );
-        if let Some(tp) = tp {
+        if let Some(tp) = tp.filter(|tp| tp.mode == TouchMode::Zones) {
             let (cols, rows) = (tp.cols as usize, tp.rows as usize);
             let cell = vec2(pad.width() / cols as f32, pad.height() / rows as f32);
             for &i in &zones {
@@ -1062,16 +1086,25 @@ impl Stage<'_> {
                 );
             }
         }
+        let at = |(x, y): (f32, f32)| pad.min + vec2(x * pad.width(), y * pad.height());
+        if tp.is_some_and(|tp| tp.mode == TouchMode::Swipe) {
+            for (f, &now) in &self.live.touch {
+                if let Some(&start) = self.live.touch_start.get(f) {
+                    self.painter
+                        .line_segment([at(start), at(now)], self.stroke(2.0, ACCENT));
+                }
+            }
+        }
         for &(x, y) in self.live.touch.values() {
-            let p = pad.min + vec2(x * pad.width(), y * pad.height());
-            let fill = if active.is_empty() { KNOB_IDLE } else { ACTIVE };
+            let p = at((x, y));
+            let fill = if engaged { ACTIVE } else { KNOB_IDLE };
             self.painter
                 .circle(p, 5.0 * s, fill, self.stroke(2.0, pal.stick_bg));
         }
 
         let resp = self
             .interact(pad.expand(10.0 * s), "touchpad")
-            .on_hover_text("Touchpad: clique para editar as zonas");
+            .on_hover_text("Touchpad: clique para editar");
         if resp.hovered() {
             self.painter.rect_stroke(
                 pad.expand(4.0 * s),

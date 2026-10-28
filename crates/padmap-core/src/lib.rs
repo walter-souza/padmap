@@ -16,4 +16,6 @@ pub use key::{Key, KeyCombo, MouseButton};
 pub use mapper::{KeyAction, Mapper};
 pub use profile::{AxisBinding, Profile, ProfileError, Settings};
 pub use stick::{MouseSettings, Sector, Stick, StickBinding, StickMode};
-pub use touchpad::{TouchActivate, TouchpadBinding, Zone};
+pub use touchpad::{
+    Swipe, TouchActivate, TouchMode, TouchMouse, TouchSwipes, TouchpadBinding, Zone,
+};

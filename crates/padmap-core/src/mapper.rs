@@ -9,7 +9,7 @@ use crate::gamepad::{Axis, Button, InputEvent};
 use crate::key::{Key, KeyCombo};
 use crate::profile::Profile;
 use crate::stick::{angle_of, Stick, StickMode};
-use crate::touchpad::TouchActivate;
+use crate::touchpad::{Swipe, TouchActivate, TouchMode, ASPECT};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -28,6 +28,10 @@ enum Source {
     Other(u8),
     /// Zona do touchpad acionada por um dedo: `(dedo, zona)`.
     Zone(u8, usize),
+    /// Gesto de um dedo, apertado até o dedo sair.
+    Swipe(u8, Swipe),
+    /// Touchpad apertado no modo mouse; `true` com dois dedos encostados.
+    TouchClick(bool),
 }
 
 /// Histerese angular, em graus: um setor só aciona com o stick essa folga para
@@ -50,8 +54,14 @@ pub struct Mapper {
     mouse_rest: (f32, f32),
     /// Dedos no touchpad agora e onde estão.
     fingers: HashMap<u8, (f32, f32)>,
+    /// Onde cada dedo encostou, para medir os gestos.
+    touch_start: HashMap<u8, (f32, f32)>,
     /// O touchpad está apertado.
     touch_clicked: bool,
+    /// No modo mouse, o dedo que move o cursor: o primeiro a encostar.
+    mouse_finger: Option<u8>,
+    /// Pixels que o dedo andou desde o último `tick`, no modo mouse.
+    touch_mouse: (f32, f32),
 }
 
 impl Mapper {
@@ -63,7 +73,10 @@ impl Mapper {
             axes: HashMap::new(),
             mouse_rest: (0.0, 0.0),
             fingers: HashMap::new(),
+            touch_start: HashMap::new(),
             touch_clicked: false,
+            mouse_finger: None,
+            touch_mouse: (0.0, 0.0),
         }
     }
 
@@ -76,12 +89,15 @@ impl Mapper {
         let out = self.release_all();
         self.profile = profile;
         self.mouse_rest = (0.0, 0.0);
+        self.mouse_finger = None;
+        self.touch_mouse = (0.0, 0.0);
         out
     }
 
     /// Movimento do mouse, em pixels inteiros, desde o último `tick`. O stick
     /// parado inclinado não gera eventos, então quem roda o `Mapper` chama isto
-    /// a cada volta do laço, passando o tempo que passou.
+    /// a cada volta do laço, passando o tempo que passou. O que o dedo andou no
+    /// touchpad em modo mouse entra junto.
     pub fn tick(&mut self, dt: Duration) -> (i32, i32) {
         let dt = dt.min(MAX_TICK).as_secs_f32();
         let (mut vx, mut vy) = (0.0, 0.0);
@@ -94,24 +110,27 @@ impl Mapper {
             vx += sx;
             vy += sy;
         }
-        if vx == 0.0 && vy == 0.0 {
+        let (tx, ty) = std::mem::take(&mut self.touch_mouse);
+        if vx == 0.0 && vy == 0.0 && tx == 0.0 && ty == 0.0 {
             self.mouse_rest = (0.0, 0.0);
             return (0, 0);
         }
-        let x = self.mouse_rest.0 + vx * dt;
-        let y = self.mouse_rest.1 + vy * dt;
+        let x = self.mouse_rest.0 + vx * dt + tx;
+        let y = self.mouse_rest.1 + vy * dt + ty;
         let (dx, dy) = (x.trunc(), y.trunc());
         self.mouse_rest = (x - dx, y - dy);
         (dx as i32, dy as i32)
     }
 
-    /// Se algum stick em modo mouse está fora da zona morta. Enquanto isso, vale
-    /// chamar `tick` com mais frequência para o cursor andar liso.
+    /// Se algum stick em modo mouse está fora da zona morta, ou um dedo move o
+    /// cursor pelo touchpad. Enquanto isso, vale chamar `tick` com mais
+    /// frequência para o cursor andar liso.
     pub fn mouse_moving(&self) -> bool {
-        self.profile.sticks.iter().any(|(&stick, b)| {
-            let (x, y) = self.stick_pos(stick);
-            b.mode == StickMode::Mouse && x.hypot(y) > self.profile.deadzone(stick)
-        })
+        self.mouse_finger.is_some()
+            || self.profile.sticks.iter().any(|(&stick, b)| {
+                let (x, y) = self.stick_pos(stick);
+                b.mode == StickMode::Mouse && x.hypot(y) > self.profile.deadzone(stick)
+            })
     }
 
     fn stick_pos(&self, stick: Stick) -> (f32, f32) {
@@ -137,21 +156,9 @@ impl Mapper {
                 }
                 self.deactivate(Source::Button(b), &mut out);
             }
-            InputEvent::TouchDown(f, x, y) => {
-                self.fingers.insert(f, (x, y));
-                if self.touch_mode() == Some(TouchActivate::Touch) || self.touch_clicked {
-                    self.press_zone(f, &mut out);
-                }
-            }
-            // A zona fica a mesma até o dedo sair: deslizar pela divisa não
-            // troca a tecla no meio.
-            InputEvent::TouchMove(f, x, y) => {
-                self.fingers.insert(f, (x, y));
-            }
-            InputEvent::TouchUp(f) => {
-                self.fingers.remove(&f);
-                self.release_zones(|s| s == f, &mut out);
-            }
+            InputEvent::TouchDown(f, x, y) => self.touch_down(f, (x, y), &mut out),
+            InputEvent::TouchMove(f, x, y) => self.touch_move(f, (x, y), &mut out),
+            InputEvent::TouchUp(f) => self.touch_up(f, &mut out),
             InputEvent::OtherButtonDown(n) => self.activate(Source::Other(n), &mut out),
             InputEvent::OtherButtonUp(n) => self.deactivate(Source::Other(n), &mut out),
             InputEvent::AxisMotion(axis, value) => {
@@ -173,23 +180,101 @@ impl Mapper {
         out
     }
 
-    fn touch_mode(&self) -> Option<TouchActivate> {
-        Some(self.profile.touchpad.as_ref()?.activate)
+    fn touch_down(&mut self, f: u8, pos: (f32, f32), out: &mut Vec<KeyAction>) {
+        self.fingers.insert(f, pos);
+        self.touch_start.insert(f, pos);
+        let Some(tp) = &self.profile.touchpad else {
+            return;
+        };
+        match tp.mode {
+            // Um dedo que encosta com o touchpad já apertado também conta: o
+            // SDL pode mandar o clique antes do toque.
+            TouchMode::Zones => {
+                if tp.activate == TouchActivate::Touch || self.touch_clicked {
+                    self.press_zone(f, out);
+                }
+            }
+            TouchMode::Mouse => {
+                self.mouse_finger.get_or_insert(f);
+            }
+            TouchMode::Swipe => {}
+        }
     }
 
-    /// Apertar o touchpad aciona a zona sob cada dedo; soltar solta todas.
+    fn touch_move(&mut self, f: u8, pos: (f32, f32), out: &mut Vec<KeyAction>) {
+        let prev = self.fingers.insert(f, pos);
+        let Some(tp) = &self.profile.touchpad else {
+            return;
+        };
+        match tp.mode {
+            // A zona fica a mesma até o dedo sair: deslizar pela divisa não
+            // troca a tecla no meio.
+            TouchMode::Zones => {}
+            TouchMode::Mouse => {
+                if let (Some(p), true) = (prev, self.mouse_finger == Some(f)) {
+                    let k = tp.mouse.speed;
+                    self.touch_mouse.0 += (pos.0 - p.0) * k;
+                    self.touch_mouse.1 += (pos.1 - p.1) * k * ASPECT;
+                }
+            }
+            // Um gesto por toque: reconhecido, fica apertado até o dedo sair.
+            TouchMode::Swipe => {
+                if self
+                    .active
+                    .iter()
+                    .any(|s| matches!(s, Source::Swipe(g, _) if *g == f))
+                {
+                    return;
+                }
+                let dir = self
+                    .touch_start
+                    .get(&f)
+                    .and_then(|&start| tp.swipe.direction(start, pos));
+                if let Some(dir) = dir {
+                    self.activate(Source::Swipe(f, dir), out);
+                }
+            }
+        }
+    }
+
+    fn touch_up(&mut self, f: u8, out: &mut Vec<KeyAction>) {
+        self.fingers.remove(&f);
+        self.touch_start.remove(&f);
+        if self.mouse_finger == Some(f) {
+            // Outro dedo encostado continua movendo o cursor.
+            self.mouse_finger = self.fingers.keys().next().copied();
+        }
+        self.release_where(
+            |s| matches!(s, Source::Zone(g, _) | Source::Swipe(g, _) if g == f),
+            out,
+        );
+    }
+
+    /// Apertar o touchpad: nas zonas "ao clicar" aciona a zona sob cada dedo;
+    /// no mouse, clica (com dois dedos, o outro clique). Soltar solta tudo.
     fn touch_click(&mut self, down: bool, out: &mut Vec<KeyAction>) {
         self.touch_clicked = down;
-        if self.touch_mode() != Some(TouchActivate::Click) {
+        let Some(tp) = &self.profile.touchpad else {
             return;
-        }
-        if down {
-            let fingers: Vec<u8> = self.fingers.keys().copied().collect();
-            for f in fingers {
-                self.press_zone(f, out);
+        };
+        match (tp.mode, down) {
+            (TouchMode::Zones, true) if tp.activate == TouchActivate::Click => {
+                let fingers: Vec<u8> = self.fingers.keys().copied().collect();
+                for f in fingers {
+                    self.press_zone(f, out);
+                }
             }
-        } else {
-            self.release_zones(|_| true, out);
+            (TouchMode::Zones, false) if tp.activate == TouchActivate::Click => {
+                self.release_where(|s| matches!(s, Source::Zone(..)), out);
+            }
+            (TouchMode::Mouse, true) => {
+                let two = self.fingers.len() >= 2;
+                self.activate(Source::TouchClick(two), out);
+            }
+            (TouchMode::Mouse, false) => {
+                self.release_where(|s| matches!(s, Source::TouchClick(_)), out);
+            }
+            _ => {}
         }
     }
 
@@ -201,14 +286,9 @@ impl Mapper {
         self.activate(Source::Zone(finger, zone), out);
     }
 
-    fn release_zones(&mut self, which: impl Fn(u8) -> bool, out: &mut Vec<KeyAction>) {
-        let zones: Vec<Source> = self
-            .active
-            .iter()
-            .copied()
-            .filter(|s| matches!(s, Source::Zone(f, _) if which(*f)))
-            .collect();
-        for s in zones {
+    fn release_where(&mut self, which: impl Fn(Source) -> bool, out: &mut Vec<KeyAction>) {
+        let sources: Vec<Source> = self.active.iter().copied().filter(|&s| which(s)).collect();
+        for s in sources {
             self.deactivate(s, out);
         }
     }
@@ -295,6 +375,15 @@ impl Mapper {
             Source::AxisPos(a) => self.profile.axes.get(&a)?.positive.clone(),
             Source::Sector(s, i) => self.profile.sticks.get(&s)?.sectors.get(i)?.key.clone(),
             Source::Zone(_, z) => self.profile.touchpad.as_ref()?.zones.get(z)?.key.clone(),
+            Source::Swipe(_, d) => self.profile.touchpad.as_ref()?.swipe.key(d).cloned(),
+            Source::TouchClick(two) => {
+                let m = &self.profile.touchpad.as_ref()?.mouse;
+                if two {
+                    m.two_finger_click.clone()
+                } else {
+                    m.click.clone()
+                }
+            }
         }
     }
 
@@ -584,6 +673,53 @@ zones=[{key='Q'},{key='E'}]
         );
         assert_eq!(m.handle(InputEvent::TouchUp(0)), [Release(Key::Q)]);
         assert_eq!(m.handle(InputEvent::TouchUp(1)), [Release(Key::E)]);
+    }
+
+    #[test]
+    fn touchpad_mouse_follows_the_first_finger() {
+        let mut m = mapper("name='t'\n[touchpad]\nmode='mouse'\nmouse={speed=1000.0}\n");
+        m.handle(InputEvent::TouchDown(0, 0.5, 0.5));
+        assert!(m.mouse_moving());
+        m.handle(InputEvent::TouchMove(0, 0.75, 0.25));
+        // Um segundo dedo não move o cursor.
+        m.handle(InputEvent::TouchDown(1, 0.1, 0.1));
+        m.handle(InputEvent::TouchMove(1, 0.75, 0.75));
+        // 1/4 da largura → 250 px; -1/4 da altura → -125 px (o touchpad é 2:1).
+        assert_eq!(m.tick(Duration::ZERO), (250, -125));
+        assert_eq!(m.tick(Duration::ZERO), (0, 0));
+        // Sem cliques definidos, valem os do mouse: dois dedos, botão direito.
+        assert_eq!(
+            m.handle(InputEvent::ButtonDown(Button::Touchpad)),
+            [Press(Key::MouseRight)]
+        );
+        assert_eq!(
+            m.handle(InputEvent::ButtonUp(Button::Touchpad)),
+            [Release(Key::MouseRight)]
+        );
+        // Tirando o primeiro dedo, o outro assume.
+        m.handle(InputEvent::TouchUp(0));
+        m.handle(InputEvent::TouchMove(1, 0.5, 0.75));
+        assert_eq!(m.tick(Duration::ZERO), (-250, 0));
+        m.handle(InputEvent::TouchUp(1));
+        assert!(!m.mouse_moving());
+    }
+
+    #[test]
+    fn touchpad_swipe_holds_until_lift() {
+        let mut m = mapper("name='t'\n[touchpad]\nmode='swipe'\nswipe={right='E',up='M'}\n");
+        m.handle(InputEvent::TouchDown(0, 0.2, 0.5));
+        assert!(m.handle(InputEvent::TouchMove(0, 0.35, 0.5)).is_empty());
+        assert_eq!(
+            m.handle(InputEvent::TouchMove(0, 0.5, 0.5)),
+            [Press(Key::E)]
+        );
+        // Voltando no mesmo toque não aciona outro gesto.
+        assert!(m.handle(InputEvent::TouchMove(0, 0.5, 0.0)).is_empty());
+        assert_eq!(m.handle(InputEvent::TouchUp(0)), [Release(Key::E)]);
+        // O clique do touchpad continua livre neste modo.
+        assert!(m
+            .handle(InputEvent::ButtonDown(Button::Touchpad))
+            .is_empty());
     }
 
     #[test]

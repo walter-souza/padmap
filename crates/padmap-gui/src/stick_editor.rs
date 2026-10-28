@@ -1075,7 +1075,7 @@ pub(crate) fn title_row(ui: &mut Ui, pal: &Palette, title: &str, value: &str) {
 }
 
 /// Deslizante na largura toda, com o trilho na cor do tema.
-fn slider(
+pub(crate) fn slider(
     ui: &mut Ui,
     pal: &Palette,
     value: &mut f32,
@@ -1273,7 +1273,7 @@ fn dashed_line(painter: &egui::Painter, a: Pos2, b: Pos2, stroke: Stroke) {
     painter.extend(Shape::dashed_line(&[a, b], stroke, 4.0, 4.0));
 }
 
-fn dashed_circle(painter: &egui::Painter, c: Pos2, r: f32, stroke: Stroke) {
+pub(crate) fn dashed_circle(painter: &egui::Painter, c: Pos2, r: f32, stroke: Stroke) {
     let n = 64;
     let points: Vec<Pos2> = (0..=n)
         .map(|k| polar(c, r, 360.0 * k as f32 / n as f32))
