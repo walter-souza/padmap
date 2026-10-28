@@ -32,7 +32,7 @@ cargo test --all
 cargo build --release
 ```
 
-O SDL3 é compilado do fonte e linkado estático (feature `sdl-build-from-source` de `padmap-input`), então o build precisa de CMake e de um compilador C. O primeiro build é lento por isso. Para testar sem esse custo, rode só `cargo test -p padmap-core`, que não depende de SDL nem de APIs do SO.
+O SDL3 é compilado do fonte e linkado estático (feature `sdl-build-from-source` de `padmap-input`), então o build precisa de CMake e de um compilador C. O primeiro build é lento por isso. No Windows o runtime do Visual C++ também é estático (`.cargo/config.toml`), para o `padmap.exe` rodar sozinho; o SDL pega o mesmo runtime por `.cargo/msvc-static-crt.cmake`, porque o CMake ignora o `crt-static` do Rust. Mudou essa configuração? `cargo clean -p sdl3-sys`, porque o Cargo não recompila o SDL sozinho. Para testar sem esse custo, rode só `cargo test -p padmap-core`, que não depende de SDL nem de APIs do SO.
 
 ## Arquitetura
 

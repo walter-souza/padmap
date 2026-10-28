@@ -1,0 +1,8 @@
+# Embute o runtime do Visual C++ no executável: o padmap.exe roda em qualquer
+# Windows sem precisar do vcruntime140.dll instalado.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# O mesmo runtime para o SDL, compilado pelo CMake. Só vale para esse alvo.
+[env]
+CMAKE_TOOLCHAIN_FILE_x86_64_pc_windows_msvc = { value = ".cargo/msvc-static-crt.cmake", relative = true }
