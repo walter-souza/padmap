@@ -3,6 +3,9 @@ name = "padmap-cli"
 description = "Linha de comando do padmap (listar, monitorar, validar e rodar perfis)"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 
 
 [dependencies]

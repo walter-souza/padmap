@@ -1,1 +1,17 @@
+# Build
 /target
+
+# Perfis de teste soltos: perfis do usuário ficam na pasta do padmap, não aqui.
+/profiles/*.toml
+!/profiles/default.toml
+
+# Editores e sistema
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Configuração local do Claude Code
+.claude/settings.local.json

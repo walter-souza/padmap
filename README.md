@@ -1,9 +1,31 @@
 # padmap
 
-Mapeia qualquer controle (Xbox, PlayStation, Switch ou genérico) para o
-teclado. Windows primeiro, com Linux e macOS já previstos na arquitetura.
+[![CI](https://github.com/walter-souza/padmap/actions/workflows/ci.yml/badge.svg)](https://github.com/walter-souza/padmap/actions/workflows/ci.yml)
+[![Licença: MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-blue.svg)](LICENSE)
 
-> Nome provisório. Estado: primeira versão com interface gráfica, ainda em testes.
+Mapeia qualquer controle (Xbox, PlayStation, Switch ou genérico) para teclado e
+mouse, para jogar com controle o que só aceita teclado. Windows primeiro; Linux
+e macOS já compilam.
+
+- Botões, gatilhos, sticks por setores de ângulo e combinações (`Ctrl+S`, `A+B`).
+- Stick ou touchpad como mouse, e botões que clicam o mouse.
+- Touchpad em zonas, como trackpad ou por gestos.
+- Botões extras: traseiros, turbo, modo, qualquer botão que o controle mande.
+- Perfis em TOML, editados na interface ou à mão, com modo claro e escuro.
+
+> Estado: primeira versão, em testes com controles reais.
+
+![Tela principal no modo escuro](docs/tela-principal-escura.png)
+
+## Baixar
+
+Cada push na `main` gera os executáveis no [CI](https://github.com/walter-souza/padmap/actions/workflows/ci.yml):
+abra a execução mais recente e baixe o artefato do seu sistema. No Windows é um
+`padmap.exe` só, sem instalar nada (o SDL e o runtime do Visual C++ vão dentro
+dele). Como o executável não é assinado, o Windows pode mostrar "O Windows
+protegeu o computador": clique em "Mais informações" e em "Executar assim mesmo".
+
+Para compilar você mesmo, veja [Compilando](#compilando).
 
 ## Como funciona
 
@@ -28,7 +50,9 @@ cargo run --release -p padmap-gui
   gatilhos conforme você mexe no controle. A etiqueta da tecla que está sendo
   enviada fica destacada. O controle conectado aparece no topo.
 - **Touchpad:** o touchpad do controle (DualShock 4, DualSense e outros) fica
-  entre os dois sticks. Clique nele para escolher um modo:
+  entre os dois sticks. Ele só aparece quando o controle conectado tem
+  touchpad (ou, sem controle, se o perfil já o mapeia). Clique nele para
+  escolher um modo:
   - **Zonas:** o touchpad dividido em zonas (inteiro, metades, colunas,
     quadrantes ou uma grade de até 4 × 3), cada uma com uma tecla. A zona
     aciona ao apertar o touchpad, na zona sob o dedo, ou já ao encostar.
@@ -91,14 +115,14 @@ cargo run --release -p padmap-gui
 - **Modo claro e escuro:** o botão de sol e lua no topo troca o tema, e a
   escolha fica salva para a próxima vez.
 
-![Tela principal no modo escuro](docs/tela-principal-escura.png)
-
 A sensibilidade dos gatilhos e a histerese continuam no perfil
 (`axis_threshold` e `release_ratio`).
 
 O mapeamento continua funcionando com a janela minimizada ou com o jogo em primeiro plano.
 
 ## Linha de comando
+
+O mesmo mapeamento, sem janela:
 
 ```sh
 cargo build --release
@@ -199,8 +223,40 @@ como qualquer tecla (`Ctrl+MouseLeft`).
 
 ## Compilando
 
-Precisa de Rust estável, CMake e um compilador C (o SDL3 é compilado junto,
-estaticamente). No Windows, o Visual Studio Build Tools já traz os dois.
+Precisa de Rust 1.95 ou mais novo, CMake e um compilador C: o SDL3 é compilado
+junto, estaticamente, e por isso o primeiro build demora. No Windows, o Visual
+Studio Build Tools (carga "Desenvolvimento para desktop com C++") traz o
+compilador e o CMake.
+
+```sh
+cargo build --release -p padmap-gui   # target/release/padmap(.exe)
+cargo test --all
+```
+
+No Windows o resultado é um arquivo só, `target/release/padmap.exe`, que roda
+em qualquer Windows 10/11 de 64 bits sem instalar nada: o SDL e o runtime do
+Visual C++ vão dentro dele (`.cargo/config.toml`). Para compartilhar, basta
+mandar esse arquivo; os perfis não vão junto e são trocados por Exportar e
+Importar.
+
+A organização do código e as decisões de projeto estão em
+[docs/arquitetura.md](docs/arquitetura.md).
+
+## Contribuindo
+
+Issues e pull requests são bem-vindos. O CI (Windows, Linux e macOS) exige:
+
+```sh
+cargo fmt --all --check
+cargo clippy --all-targets -- -D warnings
+cargo test --all
+cargo build --release
+```
+
+A lógica de mapeamento fica em `padmap-core`, que não depende de SDL nem do
+sistema, com testes. Código, comentários e mensagens são em português; as
+mensagens de commit seguem o [Conventional Commits](https://www.conventionalcommits.org/)
+em inglês. Mudanças na interface precisam funcionar no modo claro e no escuro.
 
 ## Permissões por sistema
 
@@ -208,3 +264,7 @@ estaticamente). No Windows, o Visual Studio Build Tools já traz os dois.
   administrador, o padmap também precisa rodar como administrador.
 - **Linux:** acesso de escrita a `/dev/uinput` (ex.: regra udev ou grupo `input`).
 - **macOS:** permissão de Acessibilidade para o terminal ou o app.
+
+## Licença
+
+[MIT](LICENSE).

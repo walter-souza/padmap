@@ -3,6 +3,9 @@ name = "padmap-core"
 description = "Modelo de perfis e motor de mapeamento controle -> teclado (sem dependências de SO)"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 serde.workspace = true

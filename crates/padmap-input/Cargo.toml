@@ -3,6 +3,9 @@ name = "padmap-input"
 description = "Leitura de controles via SDL3 (Xbox, PlayStation, Switch e genéricos)"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [features]
 default = ["sdl-build-from-source"]

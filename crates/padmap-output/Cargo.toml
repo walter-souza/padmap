@@ -3,6 +3,9 @@ name = "padmap-output"
 description = "Injeção de teclado por sistema operacional (Windows: SendInput, Linux: uinput, macOS: CGEvent)"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 padmap-core.workspace = true

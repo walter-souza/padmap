@@ -14,7 +14,8 @@
 
 ```
 crates/
-  padmap-core    tipos (Button, Axis, Key), perfis TOML e o Mapper. Sem SDL nem SO; 100% testável.
+  padmap-core    tipos (Button, Axis, Key), perfis TOML, sticks, touchpad, botões
+                 extras e o Mapper. Sem SDL nem SO; 100% testável.
   padmap-input   GamepadSource: SDL3 -> InputEvent normalizado.
   padmap-output  trait OutputSink + backends:
                    windows.rs  SendInput com scancodes (KEYEVENTF_SCANCODE)
@@ -61,13 +62,30 @@ Fluxo: `GamepadSource::next_event` -> `Mapper::handle` -> `Vec<KeyAction>` -> `O
 - **Mapeamento fora da interface.** A janela do egui só é redesenhada quando
   algo muda e para quando está sem foco, então a leitura do controle e o envio
   das teclas ficam numa thread própria (`padmap-gui/src/worker.rs`).
+- **Botões extras.** O SDL dá nome aos botões que o mapeamento do controle
+  conhece; os outros (traseiros, turbo…) só aparecem como botões crus do
+  joystick. `padmap-input` lê o mapeamento (`SDL_GetGamepadBindings`) e só
+  repassa os botões crus que ele não cobre, para nenhum botão acionar duas
+  vezes. No Windows, controles em modo XInput só expõem os 11 botões do Xbox;
+  botões a mais só aparecem em outros modos (DirectInput, Switch).
+- **Touchpad.** Os toques chegam com o dedo e a posição normalizada. O `Mapper`
+  guarda onde cada dedo está e onde encostou, e o touchpad tem três modos:
+  zonas (uma grade com uma tecla por zona, que fica a mesma até o dedo sair),
+  mouse (o deslocamento do primeiro dedo entra no próximo `tick`) e gestos (a
+  direção em que o dedo andou mais, depois de uma distância mínima). O `y` é
+  multiplicado pela proporção do touchpad (2:1) para medir as duas direções na
+  mesma escala.
 - **SDL enxuto.** O SDL é compilado sem vídeo, áudio, render e GPU; só
   joystick, gamepad, HIDAPI e eventos.
+- **Executável único no Windows.** O SDL é linkado estático e o runtime do
+  Visual C++ também (`.cargo/config.toml`). O CMake ignora o `crt-static` do
+  Rust, então um arquivo de toolchain (`.cargo/msvc-static-crt.cmake`) faz o
+  SDL usar o mesmo runtime.
 
 ## Próximos passos
 
-1. Testar em Windows com controles reais (Xbox, DualSense, genérico).
+1. Mais testes com controles reais (Xbox, DualSense, Switch, genéricos).
 2. Ícone na bandeja e troca de perfil por atalho no controle.
 3. Perfis por controle e por jogo (detectar o processo em primeiro plano).
-4. Botões que clicam o mouse, rolagem pelo stick, turbo, macros e camadas (segurar um botão muda o mapa).
-5. Instalador Windows (MSI/winget) e pacotes Linux/macOS.
+4. Rolagem pelo stick, turbo, macros e camadas (segurar um botão muda o mapa).
+5. Releases com executáveis prontos, instalador Windows (MSI/winget) e pacotes Linux/macOS.
