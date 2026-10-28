@@ -57,6 +57,13 @@ Fluxo: `GamepadSource::next_event` -> `Mapper::handle` -> `Vec<KeyAction>` -> `O
   sistemas (`MOUSEEVENTF_MOVE`, `REL_X`/`REL_Y` no uinput); no macOS o CGEvent
   exige posição absoluta, então a posição atual é lida e somada ao
   deslocamento, com os campos de delta preenchidos para os jogos.
+- **Sem DirectInput no Windows.** Ao procurar controles, o DirectInput abre
+  dispositivos HID que não são controles, e microfones USB com botão de mudo
+  (que têm uma interface "HID-compliant headset") paravam de mandar áudio
+  enquanto o padmap estava aberto. Ele fica desligado
+  (`SDL_JOYSTICK_DIRECTINPUT=0`) e o Windows.Gaming.Input, que o SDL deixa
+  desligado por padrão, cobre os controles genéricos. A variável de ambiente de
+  mesmo nome vale mais que o padrão do padmap.
 - **Eventos em segundo plano.** O hint `SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS`
   é ligado porque o foco está sempre no jogo, não no padmap.
 - **Mapeamento fora da interface.** A janela do egui só é redesenhada quando
@@ -88,4 +95,4 @@ Fluxo: `GamepadSource::next_event` -> `Mapper::handle` -> `Vec<KeyAction>` -> `O
 2. Ícone na bandeja e troca de perfil por atalho no controle.
 3. Perfis por controle e por jogo (detectar o processo em primeiro plano).
 4. Rolagem pelo stick, turbo, macros e camadas (segurar um botão muda o mapa).
-5. Instalador Windows (Inno Setup, depois MSI/winget), `.app` para macOS e pacotes Linux.
+5. Assinatura do executável, MSI/winget, `.app` para macOS e pacotes Linux.

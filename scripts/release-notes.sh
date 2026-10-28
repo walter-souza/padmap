@@ -25,9 +25,11 @@ section "Desempenho" "perf"
 cat <<EOF
 ## Baixar
 
-- **Windows:** \`padmap-$tag-windows-x64.exe\`. Um arquivo só, sem instalar nada.
-  Como não é assinado, o Windows pode mostrar "O Windows protegeu o computador":
-  clique em "Mais informações" e em "Executar assim mesmo".
+- **Windows:** \`padmap-$tag-windows-x64-setup.exe\` instala com atalho no menu
+  Iniciar e desinstalação pelo Windows; \`padmap-$tag-windows-x64.exe\` é o mesmo
+  programa num arquivo só, sem instalar nada. Como não são assinados, o Windows
+  pode mostrar "O Windows protegeu o computador": clique em "Mais informações" e
+  em "Executar assim mesmo".
 - **Linux:** \`padmap-$tag-linux-x64.tar.gz\`. Precisa de escrita em \`/dev/uinput\`.
 - **macOS (Apple Silicon):** \`padmap-$tag-macos-arm64.tar.gz\`. Precisa da
   permissão de Acessibilidade; na primeira vez, abra com clique direito → Abrir.

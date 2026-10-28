@@ -1,3 +1,5 @@
+<img src="assets/padmap.png" alt="" width="96" align="right">
+
 # padmap
 
 [![CI](https://github.com/walter-souza/padmap/actions/workflows/ci.yml/badge.svg)](https://github.com/walter-souza/padmap/actions/workflows/ci.yml)
@@ -21,10 +23,16 @@ e macOS já compilam.
 
 As versões ficam em [Releases](https://github.com/walter-souza/padmap/releases/latest):
 
-- **Windows:** `padmap-<versão>-windows-x64.exe`, um arquivo só, sem instalar
-  nada (o SDL e o runtime do Visual C++ vão dentro dele). Como o executável não
-  é assinado, o Windows pode mostrar "O Windows protegeu o computador": clique
-  em "Mais informações" e em "Executar assim mesmo".
+- **Windows:** dois jeitos, com o mesmo programa:
+  - `padmap-<versão>-windows-x64-setup.exe`, o instalador: atalho no menu
+    Iniciar (e, se quiser, na área de trabalho) e desinstalação pelo Windows.
+    Instala só para o seu usuário, sem pedir administrador.
+  - `padmap-<versão>-windows-x64.exe`, um arquivo só, sem instalar nada (o SDL e
+    o runtime do Visual C++ vão dentro dele).
+
+  Como não são assinados, o Windows pode mostrar "O Windows protegeu o
+  computador": clique em "Mais informações" e em "Executar assim mesmo".
+  Desinstalar não apaga os perfis.
 - **Linux:** `padmap-<versão>-linux-x64.tar.gz`, com a interface (`padmap`) e a
   linha de comando (`padmap-cli`).
 - **macOS (Apple Silicon):** `padmap-<versão>-macos-arm64.tar.gz`. Na primeira
@@ -276,15 +284,20 @@ em inglês. Mudanças na interface precisam funcionar no modo claro e no escuro.
    ```
 
 O workflow de release (`.github/workflows/release.yml`) confere se a tag bate
-com o `Cargo.toml`, compila nos três sistemas e cria o Release com os arquivos
-e as notas, geradas dos commits desde a versão anterior
+com o `Cargo.toml`, compila nos três sistemas, gera o instalador do Windows
+(`installer/padmap.iss`, Inno Setup) e cria o Release com os arquivos e as notas, geradas dos commits desde a versão anterior
 (`scripts/release-notes.sh`). Tags com hífen, como `v0.2.0-beta.1`, saem como
 pré-lançamento.
 
 ## Permissões por sistema
 
 - **Windows:** nada especial. Para enviar teclas a um jogo rodando como
-  administrador, o padmap também precisa rodar como administrador.
+  administrador, o padmap também precisa rodar como administrador. O padmap lê
+  os controles por XInput, Raw Input, Windows.Gaming.Input e HIDAPI, mas não por
+  DirectInput: a busca do DirectInput fazia alguns microfones USB (os com botão
+  de mudo) pararem de mandar áudio. Se um controle antigo só funcionar por
+  DirectInput, abra o padmap com a variável de ambiente
+  `SDL_JOYSTICK_DIRECTINPUT=1`.
 - **Linux:** acesso de escrita a `/dev/uinput` (ex.: regra udev ou grupo `input`).
 - **macOS:** permissão de Acessibilidade para o terminal ou o app.
 
