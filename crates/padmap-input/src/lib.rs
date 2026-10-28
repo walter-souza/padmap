@@ -54,6 +54,14 @@ impl GamepadSource {
         // Sem isso o SDL só entrega eventos quando a janela do app tem foco, e
         // o padmap não tem janela: o foco está sempre no jogo.
         sdl3::hint::set("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
+        // No Windows, a busca do DirectInput abre dispositivos HID que não são
+        // controles, e alguns microfones USB (os com botão de mudo) param de
+        // mandar áudio enquanto o padmap está aberto. O Windows.Gaming.Input
+        // cobre os controles genéricos que só o DirectInput pegava. Uma variável
+        // de ambiente com o mesmo nome vale mais que estes valores, então
+        // `SDL_JOYSTICK_DIRECTINPUT=1` religa o DirectInput.
+        sdl3::hint::set("SDL_JOYSTICK_DIRECTINPUT", "0");
+        sdl3::hint::set("SDL_JOYSTICK_WGI", "1");
         let sdl = sdl3::init().map_err(|e| e.to_string())?;
         let subsystem = sdl.gamepad().map_err(|e| e.to_string())?;
         let pump = sdl.event_pump().map_err(|e| e.to_string())?;
