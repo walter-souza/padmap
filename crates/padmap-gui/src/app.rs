@@ -908,6 +908,9 @@ impl PadmapApp {
 
     fn header(&mut self, ui: &mut egui::Ui, pal: &Palette) {
         ui.horizontal_centered(|ui| {
+            let (r, _) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::hover());
+            app_icon(ui.painter(), r);
+            ui.add_space(2.0);
             ui.label(RichText::new("padmap").size(18.0).strong().color(pal.text));
             ui.add_space(14.0);
 
@@ -1513,6 +1516,33 @@ fn icon_button(ui: &mut egui::Ui, pal: &Palette, icon: Icon, alert: bool) -> egu
 }
 
 /// Controle pequeno: corpo arredondado, cruz e dois botões.
+/// O ícone do padmap (`assets/padmap.svg`) desenhado no quadrado `r`. As cores
+/// são as do ícone, iguais nos dois temas.
+fn app_icon(p: &egui::Painter, r: egui::Rect) {
+    let k = r.width() / 64.0;
+    let at = |x: f32, y: f32, w: f32, h: f32| {
+        egui::Rect::from_min_size(r.min + vec2(x, y) * k, vec2(w, h) * k)
+    };
+    let blue = Color32::from_rgb(0x3B, 0x82, 0xF6);
+    p.rect_filled(
+        at(4.0, 6.0, 56.0, 54.0),
+        13.0 * k,
+        Color32::from_rgb(0x14, 0x1A, 0x28),
+    );
+    p.rect_filled(
+        at(7.0, 5.0, 50.0, 47.0),
+        11.0 * k,
+        Color32::from_rgb(0x2E, 0x35, 0x47),
+    );
+    p.rect_filled(at(26.0, 13.0, 12.0, 32.0), 3.0 * k, blue);
+    p.rect_filled(at(16.0, 23.0, 32.0, 12.0), 3.0 * k, blue);
+    p.circle_filled(
+        r.min + vec2(32.0, 29.0) * k,
+        3.0 * k,
+        Color32::from_rgb(0x1D, 0x4E, 0xD8),
+    );
+}
+
 pub(crate) fn gamepad_icon(p: &egui::Painter, c: egui::Pos2, color: Color32) {
     let stroke = Stroke::new(1.5, color);
     p.rect_stroke(
