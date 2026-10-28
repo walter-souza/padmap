@@ -32,6 +32,8 @@ cargo test --all
 cargo build --release
 ```
 
+Versões saem por tag: suba `version` em `[workspace.package]` do `Cargo.toml`, crie a tag `vX.Y.Z` igual e mande para o GitHub. `.github/workflows/release.yml` confere a tag com o `Cargo.toml`, compila nos três sistemas e cria o Release, com as notas de `scripts/release-notes.sh` (agrupa os commits `feat`/`fix`/`perf` desde a tag anterior, por isso o padrão de mensagem importa). Tag e push são com o usuário, como os commits.
+
 O SDL3 é compilado do fonte e linkado estático (feature `sdl-build-from-source` de `padmap-input`), então o build precisa de CMake e de um compilador C. O primeiro build é lento por isso. No Windows o runtime do Visual C++ também é estático (`.cargo/config.toml`), para o `padmap.exe` rodar sozinho; o SDL pega o mesmo runtime por `.cargo/msvc-static-crt.cmake`, porque o CMake ignora o `crt-static` do Rust. Mudou essa configuração? `cargo clean -p sdl3-sys`, porque o Cargo não recompila o SDL sozinho. Para testar sem esse custo, rode só `cargo test -p padmap-core`, que não depende de SDL nem de APIs do SO.
 
 ## Arquitetura

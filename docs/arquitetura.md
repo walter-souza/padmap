@@ -88,4 +88,4 @@ Fluxo: `GamepadSource::next_event` -> `Mapper::handle` -> `Vec<KeyAction>` -> `O
 2. Ícone na bandeja e troca de perfil por atalho no controle.
 3. Perfis por controle e por jogo (detectar o processo em primeiro plano).
 4. Rolagem pelo stick, turbo, macros e camadas (segurar um botão muda o mapa).
-5. Releases com executáveis prontos, instalador Windows (MSI/winget) e pacotes Linux/macOS.
+5. Instalador Windows (Inno Setup, depois MSI/winget), `.app` para macOS e pacotes Linux.

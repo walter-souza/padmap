@@ -19,11 +19,18 @@ e macOS já compilam.
 
 ## Baixar
 
-Cada push na `main` gera os executáveis no [CI](https://github.com/walter-souza/padmap/actions/workflows/ci.yml):
-abra a execução mais recente e baixe o artefato do seu sistema. No Windows é um
-`padmap.exe` só, sem instalar nada (o SDL e o runtime do Visual C++ vão dentro
-dele). Como o executável não é assinado, o Windows pode mostrar "O Windows
-protegeu o computador": clique em "Mais informações" e em "Executar assim mesmo".
+As versões ficam em [Releases](https://github.com/walter-souza/padmap/releases/latest):
+
+- **Windows:** `padmap-<versão>-windows-x64.exe`, um arquivo só, sem instalar
+  nada (o SDL e o runtime do Visual C++ vão dentro dele). Como o executável não
+  é assinado, o Windows pode mostrar "O Windows protegeu o computador": clique
+  em "Mais informações" e em "Executar assim mesmo".
+- **Linux:** `padmap-<versão>-linux-x64.tar.gz`, com a interface (`padmap`) e a
+  linha de comando (`padmap-cli`).
+- **macOS (Apple Silicon):** `padmap-<versão>-macos-arm64.tar.gz`. Na primeira
+  vez, abra com clique direito → Abrir.
+
+Veja também as [permissões por sistema](#permissões-por-sistema).
 
 Para compilar você mesmo, veja [Compilando](#compilando).
 
@@ -257,6 +264,22 @@ A lógica de mapeamento fica em `padmap-core`, que não depende de SDL nem do
 sistema, com testes. Código, comentários e mensagens são em português; as
 mensagens de commit seguem o [Conventional Commits](https://www.conventionalcommits.org/)
 em inglês. Mudanças na interface precisam funcionar no modo claro e no escuro.
+
+### Publicando uma versão
+
+1. Suba `version` em `[workspace.package]` no `Cargo.toml` e faça o commit.
+2. Crie a tag com a mesma versão e mande para o GitHub:
+
+   ```sh
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+
+O workflow de release (`.github/workflows/release.yml`) confere se a tag bate
+com o `Cargo.toml`, compila nos três sistemas e cria o Release com os arquivos
+e as notas, geradas dos commits desde a versão anterior
+(`scripts/release-notes.sh`). Tags com hífen, como `v0.2.0-beta.1`, saem como
+pré-lançamento.
 
 ## Permissões por sistema
 

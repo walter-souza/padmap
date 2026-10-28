@@ -1,0 +1,90 @@
+name: Release
+
+# Publica uma versão quando uma tag `v*` chega ao GitHub (ex.: `v0.2.0`): compila
+# nos três sistemas e cria o Release com os arquivos para baixar.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x64
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: macos-latest
+            target: macos-arm64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # A tag tem de bater com a versão do Cargo.toml, para o programa não
+      # dizer uma versão e o Release outra.
+      - name: Conferir a versão
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::A tag $GITHUB_REF_NAME não bate com a versão $version do Cargo.toml"
+            exit 1
+          fi
+
+      - run: cargo build --release -p padmap-gui -p padmap-cli
+
+      # Windows: o padmap.exe já é um arquivo só. Linux e macOS: um .tar.gz com
+      # a interface, a linha de comando, o README e a licença.
+      - name: Empacotar
+        run: |
+          mkdir dist
+          name="padmap-$GITHUB_REF_NAME-${{ matrix.target }}"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp target/release/padmap.exe "dist/$name.exe"
+          else
+            mkdir "$name"
+            cp target/release/padmap target/release/padmap-cli README.md LICENSE "$name/"
+            tar -czf "dist/$name.tar.gz" "$name"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # Notas a partir dos commits desde a tag anterior (Conventional Commits).
+      - name: Escrever as notas
+        run: bash scripts/release-notes.sh "$GITHUB_REF_NAME" > notes.md
+
+      # Tags com hífen (v0.2.0-beta.1) saem como pré-lançamento.
+      - name: Criar o Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=()
+          case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "padmap $GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            "${flags[@]}"
