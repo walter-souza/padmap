@@ -41,7 +41,8 @@ cargo run --release -p padmap-gui
     Arraste as alças para mudar as divisas, clique num setor e aperte a tecla,
     botão direito deixa o setor livre. Também tem presets de 4 e 8 direções, a
     zona morta do stick e o disparo compartilhado (setores vizinhos acionam
-    juntos na diagonal).
+    juntos na diagonal; com ele ligado, o círculo mostra em faixas suaves onde
+    isso acontece).
   - **Mouse:** o stick move o cursor. Ajuste a velocidade (pixels por segundo
     com o stick no fim do curso), a precisão (curva: mais precisão deixa o
     começo do curso lento, para mirar), a zona morta e a inversão do Y, ou use

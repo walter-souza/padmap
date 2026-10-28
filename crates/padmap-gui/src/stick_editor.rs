@@ -14,7 +14,7 @@ use eframe::egui::{
     self, vec2, Align, Align2, Color32, CornerRadius, CursorIcon, FontId, Layout, Margin, Pos2,
     Rect, Response, RichText, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder,
 };
-use padmap_core::stick::angle_of;
+use padmap_core::stick::{angle_of, SHARED_OVERLAP};
 use padmap_core::{Axis, Key, MouseSettings, Profile, Sector, Stick, StickBinding, StickMode};
 use std::collections::VecDeque;
 
@@ -517,6 +517,30 @@ impl StickEditor {
             );
         }
         painter.circle_filled(c, r_in, pal.dial_bg);
+
+        // Disparo compartilhado: nas divisas, a faixa em que os dois setores
+        // vizinhos acionam juntos, com as cores dos dois se misturando.
+        if b.shared && n > 1 {
+            for i in 0..n {
+                let prev = (i + n - 1) % n;
+                if b.sectors[i].key.is_none() || b.sectors[prev].key.is_none() {
+                    continue;
+                }
+                let start = b.sectors[i].start;
+                // Cada setor avança uma fração da própria largura sobre o vizinho.
+                let from = start - b.width(i) * SHARED_OVERLAP;
+                let to = start + b.width(prev) * SHARED_OVERLAP;
+                blend_band(
+                    &painter,
+                    c,
+                    self.deadzone() * r_in,
+                    r_in,
+                    (from, to),
+                    // Cada lado da faixa com a cor do setor em que está.
+                    (color(prev), color(i)),
+                );
+            }
+        }
 
         let (ax, ay) = self.axes();
         let (x, y) = (live.axis(ax), live.axis(ay));
@@ -1202,6 +1226,34 @@ fn capture_overlay(
         },
     );
     action
+}
+
+/// Faixa de `r0` a `r1` entre os ângulos `from` e `to`, com a cor indo
+/// suavemente de `colors.0` (em `from`) a `colors.1` (em `to`).
+fn blend_band(
+    painter: &egui::Painter,
+    c: Pos2,
+    r0: f32,
+    r1: f32,
+    (from, to): (f32, f32),
+    (a, b): (Color32, Color32),
+) {
+    const STEPS: usize = 16;
+    const ALPHA: f32 = 0.18;
+    let mut mesh = egui::Mesh::default();
+    for k in 0..=STEPS {
+        let t = k as f32 / STEPS as f32;
+        let angle = from + (to - from) * t;
+        let color = a.lerp_to_gamma(b, t).gamma_multiply(ALPHA);
+        mesh.colored_vertex(polar(c, r0, angle), color);
+        mesh.colored_vertex(polar(c, r1, angle), color);
+        if k > 0 {
+            let i = 2 * k as u32;
+            mesh.add_triangle(i - 2, i - 1, i);
+            mesh.add_triangle(i - 1, i + 1, i);
+        }
+    }
+    painter.add(Shape::mesh(mesh));
 }
 
 /// Arco grosso centrado no raio `r`, de `start` até `start + width` graus.
